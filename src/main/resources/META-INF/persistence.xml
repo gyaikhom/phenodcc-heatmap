@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<persistence version="2.0" xmlns="http://java.sun.com/xml/ns/persistence" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://java.sun.com/xml/ns/persistence http://java.sun.com/xml/ns/persistence/persistence_2_0.xsd">
+    <persistence-unit name="org.mousephenotype.dcc.heatmap.entities.pu" transaction-type="RESOURCE_LOCAL">
+        <provider>org.eclipse.persistence.jpa.PersistenceProvider</provider>
+        <!-- from phenodcc_annotations database -->
+        <class>org.mousephenotype.dcc.heatmap.entities.Annotation</class>
+
+        <!-- from phenodcc_heatmap database -->
+        <class>org.mousephenotype.dcc.heatmap.entities.ParametersForProcedureType</class>
+
+        <!-- from phenodcc_overviews database -->
+        <class>org.mousephenotype.dcc.heatmap.entities.Genotype</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.ProceduresPerformed</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.ParametersPerformed</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.MPTermForGenotypeID</class>
+
+        <!-- from impress database -->
+        <class>org.mousephenotype.dcc.heatmap.entities.ProcedureType</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.ParamMpterm</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.Parameter</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.Units</class>
+    
+        <!-- from ols database -->
+        <class>org.mousephenotype.dcc.heatmap.entities.Term</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.Centre</class>
+        <class>org.mousephenotype.dcc.heatmap.entities.Strain</class>
+        <properties>
+            <property name="javax.persistence.jdbc.url" value="${db.url}"/>
+            <property name="javax.persistence.jdbc.driver" value="${db.driver}"/>
+            <property name="javax.persistence.jdbc.user" value="${db.user}"/>
+            <property name="javax.persistence.jdbc.password" value="${db.password}"/>
+            <property name="eclipselink.cache.shared.default" value="false"/>
+        </properties>
+    </persistence-unit>
+</persistence>

@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   xmlns:cc="http://creativecommons.org/ns#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:svg="http://www.w3.org/2000/svg"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   width="15"
+   height="30"
+   id="svg2"
+   version="1.1"
+   inkscape:version="0.48.3.1 r9886"
+   sodipodi:docname="New document 1">
+  <defs
+     id="defs4" />
+  <sodipodi:namedview
+     id="base"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:pageopacity="0.0"
+     inkscape:pageshadow="2"
+     inkscape:zoom="3.9933812"
+     inkscape:cx="360.59992"
+     inkscape:cy="754.12236"
+     inkscape:document-units="px"
+     inkscape:current-layer="layer1"
+     showgrid="false"
+     inkscape:window-width="1600"
+     inkscape:window-height="1151"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1" />
+  <metadata
+     id="metadata7">
+    <rdf:RDF>
+      <cc:Work
+         rdf:about="">
+        <dc:format>image/svg+xml</dc:format>
+        <dc:type
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" />
+        <dc:title></dc:title>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(0,-1022.3622)">
+    <g
+       style="font-size:40px;font-style:normal;font-weight:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#dbdbdb;fill-opacity:1;stroke:none;font-family:Sans"
+       id="text2985"
+       inkscape:export-filename="/home/gyaikhom/work/yaikhom/projects/phenodcc-heatmap/src/main/webapp/heatmap/images/crum_sep.png"
+       inkscape:export-xdpi="66.400002"
+       inkscape:export-ydpi="66.400002">
+      <path
+         d="m 272.11328,261.97156 13.125,-20 -13.125,-20 1.57606,0 12.89062,20 -13.14104,20"
+         style="fill:#dbdbdb;fill-opacity:1;stroke:none"
+         id="path3758"
+         inkscape:connector-curvature="0"
+         sodipodi:nodetypes="cccccc"
+         inkscape:export-xdpi="66.400002"
+         inkscape:export-ydpi="66.400002"
+         inkscape:export-filename="/home/gyaikhom/work/yaikhom/projects/phenodcc-heatmap/src/main/webapp/heatmap/images/crum_sep.png" />
+    </g>
+    <path
+       d="m 271.61962,262.02133 13.125,-20 -13.125,-20 0.82813,0 12.89062,20 -12.89062,20"
+       style="font-size:40px;font-style:normal;font-weight:normal;line-height:125%;letter-spacing:0px;word-spacing:0px;fill:#b1b1b1;fill-opacity:1;stroke:none;font-family:Sans"
+       id="path3758-7"
+       inkscape:connector-curvature="0"
+       sodipodi:nodetypes="cccccc"
+       inkscape:export-xdpi="66.400002"
+       inkscape:export-ydpi="66.400002"
+       inkscape:export-filename="/home/gyaikhom/work/yaikhom/projects/phenodcc-heatmap/src/main/webapp/heatmap/images/crum_sep.png" />
+  </g>
+</svg>
