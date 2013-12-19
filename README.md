@@ -19,54 +19,75 @@ has the following features:
 Add the following code inside the `<head></head>` of your web-page
 
     <!--[if !IE]><!-->
-        <link rel="stylesheet" type="text/css" href="https://www.mousephenotype.org/heatmap/css/heatmap.1.3.1.css">
+        <link rel="stylesheet" type="text/css" href="https://www.mousephenotype.org/heatmap/css/heatmap.<VERSION>.css">
     <!--<![endif]-->
     <!--[if IE 8]>
-        <link rel="stylesheet" type="text/css" href="https://www.mousephenotype.org/heatmap/css/heatmapIE8.1.3.1.css">
+        <link rel="stylesheet" type="text/css" href="https://www.mousephenotype.org/heatmap/css/heatmapIE8.<VERSION>.css">
     <![endif]-->
     <!--[if gte IE 9]>
-        <link rel="stylesheet" type="text/css" href="https://www.mousephenotype.org/heatmap/css/heatmap.1.3.1.css">
+        <link rel="stylesheet" type="text/css" href="https://www.mousephenotype.org/heatmap/css/heatmap.<VERSION>.css">
     <![endif]-->
 
 And the following script inside the `<body></body>`
 
-    <script type="text/javascript" src="https://www.mousephenotype.org/heatmap/js/heatmap.1.3.1.js"></script>
+    <script type="text/javascript" src="https://www.mousephenotype.org/heatmap/js/heatmap.<VERSION>.js"></script>
 	<!--[if IE 8]>
         <script type="text/javascript">
         dcc.ie8 = true;
         </script>
 	<![endif]-->
-	<script>
-        new dcc.PhenoHeatMap({
-            /* identifier of <div> node that will host the heatmap */
-             'container': 'phenodcc-heatmap',
+    <!--[if !IE]><!-->
+        <script>
+            dcc.heatmapUrlGenerator = function(genotype_id, type) {
+                return 'https://www.mousephenotype.org/phenoview?gid=' + genotype_id + '&qeid=' + type;
+            };
+        </script>
+    <!--<![endif]-->
+    <!--[if lt IE 9]>
+        <script>
+            dcc.heatmapUrlGenerator = function(genotype_id, type) {
+                return 'https://www.mousephenotype.org/phenotypedata?g=' + genotype_id + '&t=' + type + '&w=all';
+            };
+        </script>
+    <![endif]-->
+    <!--[if gte IE 9]>
+        <script>
+            dcc.heatmapUrlGenerator = function(genotype_id, type) {
+                return 'https://www.mousephenotype.org/phenoview?gid=' + genotype_id + '&qeid=' + type;
+            };
+        </script>
+    <![endif]-->
+    <script>
+          new dcc.PhenoHeatMap({
+                /* identifier of <div> node that will host the heatmap */
+                'container': 'phenodcc-heatmap',
 
-            /* colony identifier (MGI identifier) */
-            'mgiid': 'MGI:1929293',
+                /* colony identifier (MGI identifier) */
+                'mgiid': 'MGI:1929293',
 
-            /* default usage mode: ontological or procedural */
-            'mode': 'ontological',
+                /* default usage mode: ontological or procedural */
+                'mode': 'ontological',
 
-            /* number of phenotype columns to use per section */
-            'ncol': 5,
+                /* number of phenotype columns to use per section */
+                'ncol': 5,
 
-            /* heatmap title to use */
-            'title': 'Cib2',
+                /* heatmap title to use */
+                'title': 'Cib2',
 
-            'url': {
-                /* the base URL of the heatmap javascript source */
-                'jssrc': 'https://www.mousephenotype.org/heatmap/js/',
+                'url': {
+                    /* the base URL of the heatmap javascript source */
+                    'jssrc': 'https://www.mousephenotype.org/heatmap/js/',
 
-                /* the base URL of the heatmap data source */
-                'json': '//www.mousephenotype.org/heatmap/rest/',
+                    /* the base URL of the heatmap data source */
+                    'json': '//www.mousephenotype.org/heatmap/rest/',
 
-                /* function that generates target URL for data visualisation */
-                'viz': function(genotype_id, type) {
-                    return 'https://www.mousephenotype.org/phenotypedata?g=' + genotype_id
-                        + '&t=' + type + '&w=all';
+                    /* function that generates target URL for data visualisation */
+                    'viz': dcc.heatmapUrlGenerator
                 }
-            }
-        });
-	</script>
+            });
+    </script>
+
+Replace `<VERSION>` with the correct version number from `pom.xml`.
+
 
 [impress]: http://www.mousephenotype.org/impress
