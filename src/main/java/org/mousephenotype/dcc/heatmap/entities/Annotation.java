@@ -154,6 +154,8 @@ public class Annotation implements Serializable {
     private String yMP1;
     @Column(name = "pvalue_double", precision = 22)
     private Double pvalueDouble;
+    @Column(name = "pvalue_sex", precision = 22)
+    private Double pvalueSex;
 
     public Annotation() {
     }
@@ -640,5 +642,13 @@ public class Annotation implements Serializable {
 
     public void setPvalueDouble(Double pvalueDouble) {
         this.pvalueDouble = pvalueDouble;
+    }
+
+    public Double getPvalueSex() {
+        return pvalueSex;
+    }
+
+    public void setPvalueSex(Double pvalueSex) {
+        this.pvalueSex = pvalueSex;
     }
 }

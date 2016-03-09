@@ -29,18 +29,19 @@ import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
+import org.mousephenotype.dcc.entities.impress.ParamMpterm;
+import org.mousephenotype.dcc.entities.overviews.ACentre;
+import org.mousephenotype.dcc.entities.overviews.Genotype;
+import org.mousephenotype.dcc.entities.overviews.Strain;
 import org.mousephenotype.dcc.heatmap.entities.CellDetails;
-import org.mousephenotype.dcc.heatmap.entities.Centre;
 import org.mousephenotype.dcc.heatmap.entities.ColumnEntry;
 import org.mousephenotype.dcc.heatmap.entities.Details;
-import org.mousephenotype.dcc.heatmap.entities.Genotype;
 import org.mousephenotype.dcc.heatmap.entities.Heatmap;
 import org.mousephenotype.dcc.heatmap.entities.MPTermForGenotypeID;
-import org.mousephenotype.dcc.heatmap.entities.ParamMpterm;
 import org.mousephenotype.dcc.heatmap.entities.ParametersForProcedureType;
 import org.mousephenotype.dcc.heatmap.entities.RowEntry;
 import org.mousephenotype.dcc.heatmap.entities.Significance;
-import org.mousephenotype.dcc.heatmap.entities.Strain;
+import org.mousephenotype.dcc.heatmap.entities.SignificanceEntry;
 
 /**
  *
@@ -59,11 +60,12 @@ public class MPTermForGenotypeIDFacadeREST extends AbstractFacade<MPTermForGenot
     @Path("heatmap")
     public HeatmapPack getByMgiId(
             @QueryParam("type") String type,
-            @QueryParam("mgiid") String mgiId) {
+            @QueryParam("mgiid") String mgiId,
+            @QueryParam("filter") String filter) {
         HeatmapPack p = new HeatmapPack();
         List<RowEntry> r = getRowEntries(type);
-        List<ColumnEntry> c = getColumnEntriesByMgiId(mgiId);
-        Double[][] v = getSignificance(r, c, type);
+        List<ColumnEntry> c = getColumnEntries(filter, mgiId);
+        SignificanceEntry[][] v = getSignificance(r, c, type);
         Heatmap heatmap = new Heatmap("A heatmap", r, c, v);
         p.setData(heatmap);
         return p;
@@ -102,14 +104,18 @@ public class MPTermForGenotypeIDFacadeREST extends AbstractFacade<MPTermForGenot
         query = em.createNamedQuery("MPTermForGenotypeID.getDetails", Details.class);
         query.setParameter("type", type);
         query.setParameter("genotypeId", genotypeId);
-        query.setParameter("threshold", threshold);
         List<Details> tempDetails = query.getResultList();
+        List<Details> significant = new ArrayList<>();
         for (Details x : tempDetails) {
-            setMpTerm(em, x);
-            setProcedureName(em, x);
+            SignificanceEntry s = x.getSignificance();
+            if (s.getpValue() < threshold || s.getSexPvalue() < threshold) {
+                setMpTerm(em, x);
+                setProcedureName(em, x);
+                significant.add(x);
+            }
         }
-        Collections.sort(tempDetails);
-        CellDetails details = new CellDetails(tempDetails);
+        Collections.sort(significant);
+        CellDetails details = new CellDetails(significant);
         em.close();
 
         p.setData(details);
@@ -147,13 +153,21 @@ public class MPTermForGenotypeIDFacadeREST extends AbstractFacade<MPTermForGenot
         return trimmed;
     }
 
-    private List<ColumnEntry> getColumnEntriesByMgiId(String mgiId) {
+    private List<ColumnEntry> getColumnEntries(
+            String filter,
+            String mgiId) {
         EntityManager em = getEntityManager();
         TypedQuery<Genotype> query;
         query = em.createNamedQuery(
-                "MPTermForGenotypeID.getColumnEntriesMgiId",
+                (filter == null
+                        ? "MPTermForGenotypeID.getColumnEntriesMgiId"
+                        : "MPTermForGenotypeID.getColumnEntriesFilter"),
                 Genotype.class);
-        query.setParameter("mgiId", mgiId);
+        if (filter == null) {
+            query.setParameter("mgiId", mgiId);
+        } else {
+            query.setParameter("filter", filter + "%");
+        }
         List<ColumnEntry> columnEntries = new ArrayList<>();
         List<Genotype> genes = query.getResultList();
         Iterator<Genotype> i = genes.iterator();
@@ -164,7 +178,7 @@ public class MPTermForGenotypeIDFacadeREST extends AbstractFacade<MPTermForGenot
             c.setAllele(g.getAlleleName());
             c.setSymbol(g.getGeneSymbol());
 
-            Centre centre = em.find(Centre.class, g.getCentreId());
+            ACentre centre = em.find(ACentre.class, g.getCentreId());
             if (centre != null) {
                 c.setCentre(centre.getFullName());
                 c.setIlar(centre.getShortName());
@@ -180,39 +194,43 @@ public class MPTermForGenotypeIDFacadeREST extends AbstractFacade<MPTermForGenot
         return columnEntries;
     }
 
-    private Double[][] getSignificance(List<RowEntry> rows, List<ColumnEntry> columns, String type) {
+    private SignificanceEntry[][] getSignificance(List<RowEntry> rows, List<ColumnEntry> columns, String type) {
         EntityManager em = getEntityManager();
         TypedQuery<Significance> query;
 
         if (columns.isEmpty() || rows.isEmpty()) {
-            return new Double[0][0];
+            return new SignificanceEntry[0][0];
         }
 
-        if (type == null) {
-            query = em.createNamedQuery("MPTermForGenotypeID.getSignificanceFilterUntyped", Significance.class);
-        } else {
-            query = em.createNamedQuery("MPTermForGenotypeID.getSignificanceFilterTyped", Significance.class);
-            query.setParameter("type", type);
-        }
+        List<Significance> significance = new ArrayList<>();
+        try {
+            if (type == null) {
+                query = em.createNamedQuery("MPTermForGenotypeID.getSignificanceFilterUntyped", Significance.class);
+            } else {
+                query = em.createNamedQuery("MPTermForGenotypeID.getSignificanceFilterTyped", Significance.class);
+                query.setParameter("type", type);
+            }
 
-        Collection<String> genotypeIds = new ArrayList<>();
-        for (int i = 0, ncol = columns.size(); i < ncol; ++i) {
-            genotypeIds.add(columns.get(i).getKey().toString());
+            Collection<String> genotypeIds = new ArrayList<>();
+            for (int i = 0, ncol = columns.size(); i < ncol; ++i) {
+                genotypeIds.add(columns.get(i).getKey().toString());
+            }
+            query.setParameter("genotypeIds", genotypeIds);
+            // have to add a restriction on mpterm
+            Collection<String> mpterms = new ArrayList<>();
+            for (int i = 0; i < rows.size(); i++) {
+                mpterms.add(rows.get(i).getKey());
+            }
+            query.setParameter("mpterms", mpterms);
+            significance = query.getResultList();
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
         }
-        query.setParameter("genotypeIds", genotypeIds);
-        // have to add a restriction on mpterm
-        Collection<String> mpterms = new ArrayList<>();
-        for (int i = 0; i < rows.size(); i++) {
-            mpterms.add(rows.get(i).getKey());
-        }
-        query.setParameter("mpterms", mpterms);
-
-        List<Significance> significance = query.getResultList();
         em.close();
         return toGrid(significance, rows, columns);
     }
 
-    private Double[][] toGrid(
+    private SignificanceEntry[][] toGrid(
             List<Significance> significance,
             List<RowEntry> rows,
             List<ColumnEntry> columns) {
@@ -228,10 +246,10 @@ public class MPTermForGenotypeIDFacadeREST extends AbstractFacade<MPTermForGenot
             columnIndex.put(columns.get(i).getKey().toString(), i);
         }
 
-        Double[][] pvalues = new Double[nrow][ncol];
+        SignificanceEntry[][] pvalues = new SignificanceEntry[nrow][ncol];
         for (i = 0; i < nrow; ++i) {
             for (j = 0; j < ncol; ++j) {
-                pvalues[i][j] = -1.0;
+                pvalues[i][j] = new SignificanceEntry(-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0);
             }
         }
 
@@ -240,7 +258,7 @@ public class MPTermForGenotypeIDFacadeREST extends AbstractFacade<MPTermForGenot
             Significance s = iterator.next();
             i = rowIndex.get(s.getKey());
             j = columnIndex.get(s.getGenotypeId().toString());
-            pvalues[i][j] = s.getPvalue();
+            pvalues[i][j] = s.getSignificance();
         }
         return pvalues;
     }

@@ -27,10 +27,11 @@ public class Heatmap implements Serializable {
     private String title;
     private List<RowEntry> rowEntries;
     private List<ColumnEntry> columnEntries;
-    private Double[][] significance;
+    private SignificanceEntry[][] significance;
     
     public Heatmap(String title, List<RowEntry> rowEntries,
-            List<ColumnEntry> columnEntries, Double[][] significance) {
+            List<ColumnEntry> columnEntries,
+            SignificanceEntry[][] significance) {
         this.title = title;
         this.rowEntries = rowEntries;
         this.columnEntries = columnEntries;
@@ -64,11 +65,11 @@ public class Heatmap implements Serializable {
     }
 
      @XmlElement(name = "significance")
-    public Double[][] getSignificance() {
+    public SignificanceEntry[][] getSignificance() {
         return significance;
     }
 
-    public void setSignificance(Double[][] significance) {
+    public void setSignificance(SignificanceEntry[][] significance) {
         this.significance = significance;
     }
 

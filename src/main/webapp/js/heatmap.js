@@ -16,7 +16,9 @@
  * @author Gagarine Yaikhom <g.yaikhom@har.mrc.ac.uk>
  */
 
-(function() {
+/* global EmbryoHeatmap, d3 */
+
+(function () {
     /* this is the global variable where we expose the public interfaces */
     if (typeof dcc === 'undefined')
         dcc = {};
@@ -26,16 +28,14 @@
         dcc_rgbHexColourRegEx = /^#?([0-9a-zA-Z]{2})([0-9a-zA-Z]{2})([0-9a-zA-Z]{2})$/,
         dcc_rgbHex6ColourRegEx = /^#?([0-9a-zA-Z])([0-9a-zA-Z])([0-9a-zA-Z])$/,
         dcc_rgbaColourRegEx = /^rgba?\((\d+),[\s\xa0]*(\d+),[\s\xa0]*(\d+)(?:,[\s\xa0]*(0\.\d+))?\)$/,
-
+        REST_ACCESS_POINT = '/phenoview/rest/measurements/download/significant/parameters/?mgiid=',
         /* The following keeps track of the mouse events that are attached with
          * the body of the documents */
         dcc_mouseDown = false,
-
         /* for saving existing mouse event handlers before over-ridding them */
         dcc_body = window.document.body,
         dcc_oldBodySelectStartHandler = dcc_body.onselectstart,
         dcc_oldBodyMouseUpHandler = dcc_body.onmouseup,
-
         /* colours that are made available on the heatmap colour picker */
         availableColours =
         [
@@ -46,8 +46,38 @@
             '#9467bd', '#c5b0d5', '#8c564b', '#c49c94',
             '#e377c2', '#f7b6d2', '#7f7f7f', '#c7c7c7',
             '#bcbd22', '#dbdb8d', '#17becf', '#9edae5'
-        ]
+        ],
+        /* constants from phenoview control settings. */
+        SHOW_HOM = 0x20000, /* include homozygotes */
+        SHOW_HET = 0x40000, /* include heterozygotes */
+        SHOW_HEM = 0x80000, /* include hemizygotes */
+        SHOW_ALL_ZYGOSITIES = SHOW_HOM | SHOW_HET | SHOW_HEM,
+        /** see Phenoview source code the bit-map flags */
+        DEFAULT_VISUALISATION_SETTING = 3144161,
+        SETTINGS_WITHOUT_ZYGOSITY = DEFAULT_VISUALISATION_SETTING ^ SHOW_ALL_ZYGOSITIES,
+        /* when slider is reset */
+        DEFAULT_PVALUE_THRESHOLD = 0.0001
         ;
+
+    function setCookie(cookieName, cookieValue, daysToExpiry) {
+        var date = new Date();
+        date.setTime(date.getTime() + (daysToExpiry * 24 * 60 * 60 * 1000));
+        var expires = "expires=" + date.toUTCString();
+        document.cookie = cookieName + "=" + (cookieValue ? cookieValue : '') + "; " + expires;
+    }
+
+    function getCookie(cookieName) {
+        var name = cookieName + "=";
+        var cookiesArray = document.cookie.split(';');
+        for (var i = 0; i < cookiesArray.length; i++) {
+            var cookie = cookiesArray[i];
+            while (cookie.charAt(0) === ' ')
+                cookie = cookie.substring(1);
+            if (cookie.indexOf(name) === 0)
+                return cookie.substring(name.length, cookie.length);
+        }
+        return undefined;
+    }
 
     /**
      * Retrieves all of the properties that are specific to an object, excluding
@@ -56,7 +86,7 @@
      * @param {type} o Object to retrieve keys from.
      * @returns {Array} List of property names.
      */
-    Object.keys = Object.keys || function(o) {
+    Object.keys = Object.keys || function (o) {
         var result = [];
         for (var name in o)
             if (o.hasOwnProperty(name))
@@ -98,10 +128,11 @@
      * Extracts the p-value from a cell datum.
      *
      * @param {Object} datum Object that contains the data.
+     * @param {String} which Which -value to extract.
      * @returns {Real} Floating point value.
      */
-    function dcc_pvalueExtractor(datum) {
-        return datum;
+    function dcc_pvalueExtractor(datum, which) {
+        return datum[which];
     }
 
     /**
@@ -150,7 +181,7 @@
     function dcc_get(url, handler) {
         var request = new XMLHttpRequest();
         request.open('GET', url, true);
-        request.onreadystatechange = function(event) {
+        request.onreadystatechange = function (event) {
             if (request.readyState === 4) {
                 if (request.status === 200)
                     handler(JSON.parse(request.responseText));
@@ -173,7 +204,7 @@
      * @param {Integer} nchars Number of characters to discard.
      * @return {String} A substring with the remaining characters.
      */
-    String.prototype.discard = function(nchars) {
+    String.prototype.discard = function (nchars) {
         var length = this.length - nchars;
         return nchars < 0 ? this.substr(0, length)
             : this.substr(nchars, length);
@@ -192,7 +223,7 @@
             value = view.getComputedStyle(node, "").getPropertyValue(property);
         else if (node.currentStyle) {
             property = property.replace(/\-(\w)/g,
-                function(str, p1) {
+                function (str, p1) {
                     return p1.toUpperCase();
                 });
             value = node.currentStyle[property];
@@ -504,7 +535,7 @@
     function dcc_throttle(method, delay, thisArg) {
         clearTimeout(method.throttleTimeout);
         method.throttleTimeout = setTimeout(
-            function() {
+            function () {
                 method.apply(thisArg);
             }, delay);
     }
@@ -689,7 +720,7 @@
     function dcc_preparePopupHeader(content, isOntological) {
         var classPrefix = 'dcc-heatmap-popup-',
             tr = dcc_createNode(dcc_createNode(
-            dcc_createNode(content, 'table'), 'thead'), 'tr');
+                dcc_createNode(content, 'table'), 'thead'), 'tr');
         if (isOntological) {
             classPrefix += 'ont-';
             dcc_createNode(tr, 'th', null, classPrefix + 'hp', 'Procedure');
@@ -699,6 +730,23 @@
         dcc_createNode(tr, 'th', null, classPrefix + 'hi', '');
         dcc_createNode(tr, 'th', null, classPrefix + 'hv', 'p-value');
     }
+
+    function dcc_preparePopupToolbar(heatmap, content, data) {
+        if (data === undefined)
+            return;
+        var classPrefix = 'dcc-heatmap-popup-', t, s, a, k, qeids = '';
+        t = dcc_createNode(content, 'div', null, classPrefix + 'toolbar');
+        dcc_createNode(t, 'div', null, classPrefix + 'toolbar-label', 'Visualise:');
+        a = dcc_createNode(t, 'div', null, classPrefix + 'toolbar-button', 'All parameters');
+        s = dcc_createNode(t, 'div', null, classPrefix + 'toolbar-button', 'All significant parameters');
+
+        for (k in data)
+            qeids += data[k].k + ',';
+
+        a.onclick = heatmap.getPopupToolbarOnClickHandler(heatmap.popupType);
+        s.onclick = heatmap.getPopupToolbarOnClickHandler(qeids.substring(0, qeids.length - 1));
+    }
+
 
     /**
      * The heatmap displays annotation results based on the p-value associated
@@ -746,7 +794,7 @@
      * 
      * @param {Object} event Event object for mouse up.
      */
-    dcc_body.onmouseup = function(event) {
+    dcc_body.onmouseup = function (event) {
         dcc_mouseDown = false;
         dcc_body.onselectstart = dcc_oldBodySelectStartHandler;
         if (dcc_oldBodyMouseUpHandler)
@@ -766,17 +814,21 @@
      * @param {Function} onValueChange Processing to do when value changes.
      * @param {Real} value Optional default value.
      */
-    var Slider = function(parent, id, label, min, max, height,
-        width, onValueChange, value) {
+    var Slider = function (parent, id, label, min, max, height,
+        width, onValueChange, initialValue, defaultValue) {
         this.id = id;
         this.minValue = min;
         this.maxValue = max;
         this.valueRange = max - min;
 
         /* if default value is unspecified, use the middle */
-        this.defaultValue = value === undefined
-            ? .5 * (this.maxValue - this.minValue) : value;
-
+        this.defaultValue = defaultValue === undefined
+            ? .5 * (this.maxValue - this.minValue) : defaultValue;
+        if (initialValue === undefined ||
+            initialValue < min || initialValue > max)
+            this.initialValue = defaultValue;
+        else
+            this.initialValue = initialValue;
         this.onValueChange = onValueChange;
         this.sliderHeight = height;
         this.sliderWidth = width;
@@ -789,7 +841,7 @@
         /**
          * Returns the current slider value.
          */
-        getSliderValue: function() {
+        getSliderValue: function () {
             var me = this, currentValue = me.value.value;
             if (dcc_floatingPointRegEx.test(currentValue))
                 currentValue = parseFloat(currentValue);
@@ -797,13 +849,12 @@
                 dcc_reportError('Invalid threshold value');
             return currentValue;
         },
-
         /**
          * Converts current slider value to slider button position.
          * This is used for updating the position of the slider button when
          * user updates the value text box.
          */
-        positionFromValue: function() {
+        positionFromValue: function () {
             var me = this, valueBox = me.value, value = valueBox.value;
             if (dcc_floatingPointRegEx.test(value)) {
                 dcc_style(valueBox, 'color', '#000000'); /* valid value */
@@ -832,13 +883,12 @@
             return me.minButtonLeft + me.barWidth
                 * (value - me.minValue) / me.valueRange; /* lerp */
         },
-
         /**
          * Converts current slider button position to slider value.
          * This is used for updating the slider value when the user drags the
          * slider button.
          */
-        valueFromPosition: function() {
+        valueFromPosition: function () {
             var me = this, value;
             dcc_style(me.value, 'color', '#000000');
 
@@ -850,35 +900,33 @@
 
             return dcc_precision(value);
         },
-
         /**
          * This event handler is invoked when the user begins dragging the
          * slider button.
          * 
          * @param {Object} button Event is attached to the button DOM node.
          */
-        getDragStartHandler: function(button) {
-            return function(event) {
+        getDragStartHandler: function (button) {
+            return function (event) {
                 dcc_mouseDown = true;
                 event = dcc_getEvent(event);
                 button.displacement = dcc_left(button) - dcc_pageX(event);
 
                 /* prevent selection event when dragging */
-                dcc_body.onselectstart = function() {
+                dcc_body.onselectstart = function () {
                     return false;
                 };
             };
         },
-
         /**
          * This event handler is invoked when the user continues dragging
          * the slider button.
          * 
          * @param {Object} button Event is attached to the button DOM node.
          */
-        getDragHandler: function(button) {
+        getDragHandler: function (button) {
             var me = this;
-            return function(event) {
+            return function (event) {
                 event = dcc_getEvent(event);
                 if (dcc_mouseDown) {
                     var newPosition = dcc_pageX(event) + button.displacement;
@@ -894,11 +942,10 @@
                 }
             };
         },
-
         /**
          * Attaches events for implementing dragging event on slider button.
          */
-        attachSliderDragHandler: function() {
+        attachSliderDragHandler: function () {
             var me = this, sliderRegion = me.range, button = me.button,
                 dragStart = me.getDragStartHandler(button),
                 drag = me.getDragHandler(button);
@@ -912,57 +959,48 @@
             dcc_handleEvent(sliderRegion, 'touchmove', drag);
             sliderRegion.onmousemove = drag;
         },
-
         /**
          * The slider dimensions must be set based on the size of the labels,
          * supplied slider styling etc. Hence, these are calculated dynamically
          * after the components have been rendered.
          */
-        refitSlider: function() {
+        refitSlider: function () {
             var me = this,
                 /* vertical middle of the slider component */
                 midHeight = me.sliderHeight * .5,
-
                 /* label dimensions */
                 labelWidth = dcc_width(me.label),
                 labelHeight = dcc_height(me.label),
                 labelTop = midHeight - labelHeight * .5,
-
                 /* value box dimensions */
                 valueWidth = dcc_width(me.value)
                 + dcc_padding(me.value, 'left')
                 + dcc_padding(me.value, 'right')
                 + dcc_margin(me.value, 'left')
                 + dcc_margin(me.value, 'right'),
-                
                 valueHeight = dcc_height(me.value)
                 + dcc_padding(me.value, 'top')
                 + dcc_padding(me.value, 'bottom'),
                 valueTop = midHeight - valueHeight * .5,
-
                 /* range contains the bar, button, and min and max labels */
                 rangeWidth = me.sliderWidth - labelWidth - valueWidth
                 - dcc_padding(me.range, 'left')
                 - dcc_padding(me.range, 'right') - 2,
                 rangeTop = 0,
                 rangeHeight = me.sliderHeight,
-
                 /* horizontal bar dimensions */
                 barWidth = rangeWidth,
                 barHeight = dcc_height(me.bar),
                 barTop = midHeight - barHeight * .5,
                 barLeft = dcc_padding(me.range, 'left'),
-
                 /* slider button dimensions */
                 buttonHeight = dcc_height(me.button),
                 buttonTop = midHeight - buttonHeight * .5,
-
                 /* min label dimensions */
                 minWidth = dcc_width(me.min),
                 minHeight = dcc_height(me.min),
                 minTop = midHeight + buttonHeight * .5 + minHeight * .25,
                 minLeft = barLeft - minWidth * .5,
-
                 /* max label dimensions */
                 maxWidth = dcc_width(me.max),
                 maxTop = minTop,
@@ -979,7 +1017,6 @@
             me.maxButtonRight = me.barRight - me.halfButtonWidth;
 
             /* using the dimensions just calculated, resize components */
-            dcc_width(me.slider, me.sliderWidth);
             dcc_height(me.slider, me.sliderHeight);
 
             dcc_top(me.label, labelTop);
@@ -1000,10 +1037,8 @@
             dcc_top(me.max, maxTop);
             dcc_left(me.max, maxLeft);
 
-            me.setValue();
             return me;
         },
-
         /**
          * Render the components of the slider by adding DOM nodes for each of
          * the components. Note that the identifier for each of the components
@@ -1011,7 +1046,7 @@
          *
          * @param {Object} parent Parent DOM nodes that contains the slider.
          */
-        renderSlider: function(parent) {
+        renderSlider: function (parent) {
             var me = this, id = me.id, prefix = 'dcc-slider';
 
             /* contains the entire slider */
@@ -1031,12 +1066,12 @@
              * 
              * @param {Object} event Event object for key up.
              */
-            me.value.onkeyup = function(event) {
+            me.value.onkeyup = function (event) {
                 me.setValue(me.value.value);
             };
 
             /* important to call this after attaching the event above */
-            me.value.value = me.defaultValue;
+            me.value.value = me.initialValue;
 
             /* range contains the bar, button, and min and max labels */
             me.range = dcc_createNode(me.slider, 'div',
@@ -1050,8 +1085,8 @@
             me.reset = dcc_createNode(me.range, 'div',
                 id + '-reset', prefix + '-reset');
             dcc_attr(me.reset, 'title', 'Reset slider value');
-            dcc_handleEvent(me.reset, 'click', function() {
-                me.setValue();
+            dcc_handleEvent(me.reset, 'click', function () {
+                me.setValue(me.defaultValue);
             });
 
             me.min = dcc_createNode(me.range, 'div',
@@ -1061,28 +1096,25 @@
 
             me.refitSlider();
             me.attachSliderDragHandler(me);
-            me.onValueChange(me.value.value);
+            me.value.onkeyup();
             return me;
         },
-
         /**
          * Sets slider value and position of the slider button.
          * 
          * @param {Real} value New value for the slider.
          */
-        setValue: function(value) {
+        setValue: function (value) {
             var me = this;
             me.value.value = value === undefined ? me.defaultValue : value;
             me.buttonLeft = me.positionFromValue();
             dcc_left(me.button, me.buttonLeft);
-            me.onValueChange(me.defaultValue);
+            me.onValueChange(me.value.value);
         },
-
-        hideSlider: function() {
+        hideSlider: function () {
             dcc_style(this.slider, 'visibility', 'hidden');
         },
-
-        showSlider: function() {
+        showSlider: function () {
             dcc_style(this.slider, 'visibility', 'visible');
         }
     };
@@ -1104,7 +1136,8 @@
      * 
      * @param {Object} prop Configuration object that specialises the heatmap.
      */
-    dcc.PhenoHeatMap = function(prop) {
+    dcc.PhenoHeatMap = function (prop) {
+        var mode = getCookie('phenodcc_heatmap_mode');
         if (prop === undefined)
             dcc_reportError('Invalid heatmap properties');
         this.version = dcc_semanticVersion;
@@ -1117,6 +1150,13 @@
         this.mgiId = prop.mgiid;
 
         /* ontological or procedural (default is procedural) */
+        if (mode)
+            prop.mode = mode;
+        else {
+            if (prop.mode !== 'ontological' && prop.mode !== 'procedural')
+                prop.mode = 'ontological';
+            setCookie('phenodcc_heatmap_mode', prop.mode);
+        }
         this.isOntological = prop.mode === 'ontological';
         this.numColumns = (prop.ncol === undefined ? 5 : prop.ncol);
 
@@ -1127,9 +1167,19 @@
         this.jssrc = dcc_endWithSlash(this.jssrc);
         this.json = prop.url.json === undefined ? 'rest/' : prop.url.json;
         this.json = dcc_endWithSlash(this.json);
-        if (prop.url.viz === undefined || typeof prop.url.viz !== 'function')
-            dcc_reportError('Invalid vizualisation target URL generator');
-        this.viz = prop.url.viz;
+
+        /* since changing this requires a lot more interaction/work with
+         * the embedding code than necessary, it is better to do this internally.
+         * we will just ignore what is passed.
+         */
+        this.viz = function (genotype_id, type, vizSetting, pvalueThreshold) {
+            return '/phenoview/?gid=' + genotype_id
+                + '&qeid=' + type
+                + (vizSetting === undefined ? ''
+                    : ('&ctrl=' + vizSetting))
+                + (pvalueThreshold === undefined ? ''
+                    : ('&pt=' + pvalueThreshold));
+        };
 
         this.rowFormatter = dcc_rowFormatter;
         this.columnFormatter = dcc_columnFormatter;
@@ -1232,6 +1282,9 @@
         this.popuGid = null;
         this.popupType = null;
 
+        /* should the download include baseline measurements */
+        this.includeBaseline = false;
+
         this.initialiseHeatmap();
     };
 
@@ -1239,15 +1292,14 @@
      * The following are object methods that are common to all heatmaps.
      */
     dcc.PhenoHeatMap.prototype = {
-        getVersion: function() {
+        getVersion: function () {
             return this.version;
         },
-
         /**
          * Updates web service resources URL that supply phenotype annotations.
          * This is used when switching modes between procedural and ontological.
          */
-        updateUrls: function() {
+        updateUrls: function () {
             var me = this;
             if (me.isOntological)
                 me.detailsUrl = me.heatmapUrl = me.json + 'ontological/';
@@ -1256,14 +1308,17 @@
             me.heatmapUrl += 'heatmap';
             me.detailsUrl += 'details';
         },
-
         /**
          * Switching mode between procedural and ontological.
          */
-        changeMode: function() {
+        changeMode: function () {
             var me = this;
             me.type = undefined;
             me.isOntological = !me.isOntological;
+            if (me.isOntological)
+                setCookie('phenodcc_heatmap_mode', 'ontological');
+            else
+                setCookie('phenodcc_heatmap_mode', 'procedural');
             me.updateUrls();
             me.breadcrums = [{
                     'l': 'Overview'
@@ -1271,14 +1326,13 @@
             me.updateNavigationBar();
             me.retrieveSingleGeneData();
         },
-
         /**
          * Users are allowed to customise the colour for displaying significant
          * or insignificant phenotype calls. Since these colours are chosen
          * using the heatmap legends, the following functions prepares them
          * for use in rendering the p-value cells.
          */
-        prepareColours: function() {
+        prepareColours: function () {
             var me = this;
             me.significantColour = dcc_bgColour(me.significant);
             me.insignificantColour = dcc_bgColour(me.insignificant);
@@ -1287,7 +1341,6 @@
             me.insignificantColourChannels
                 = dcc_splitColourToIntegralChannels(me.insignificantColour);
         },
-
         /**
          * All of the p-value cells in the heatmap are active. By hovering or
          * clicking on these cells, users can retrieve further details about
@@ -1299,18 +1352,18 @@
          * @param {Integer} gid Genotype identifier.
          * @param {String} type Corresponding ontology or procedure.
          */
-        addCellEventHandlers: function(td, pvalue, gid, type) {
+        addCellEventHandlers: function (td, pvalue, gid, type) {
             var me = this, click, hover;
             if (pvalue !== undefined && type) {
                 dcc_class(td, 'clickable');
 
-                click = me.getCellOnClickHandler(gid, type);
+                click = me.getCellOnClickHandler(gid, type, pvalue);
                 hover = me.getCellOnMouseoverHandler(gid, type);
 
                 td.onmouseup = click;
                 td.onmouseover = hover;
 
-                dcc_handleEvent(td, 'touchstart', function(event) {
+                dcc_handleEvent(td, 'touchstart', function (event) {
                     dcc_preventEventBubbling(event);
                     td.touchEvent = event;
                     td.touchStartTime = new Date();
@@ -1321,7 +1374,7 @@
                  * However, to activate click events, the user must press
                  * the cell for 1000 milliseconds before releasing. If released
                  * prior to this, the event will be interpreted as hovering */
-                dcc_handleEvent(td, 'touchend', function(event) {
+                dcc_handleEvent(td, 'touchend', function (event) {
                     var now = new Date();
                     dcc_preventEventBubbling(event);
                     if (now.getTime() - td.touchStartTime.getTime() > 1000)
@@ -1331,7 +1384,6 @@
                 });
             }
         },
-
         /**
          * We initially had the option of exploring multiple gene annotations
          * simultaneously. However, due to user feedback this exploration mode
@@ -1341,11 +1393,10 @@
          * @param {Object} parent Parent DOM node.
          * @returns {Object} The contents DOM node.
          */
-        prepareSingleGeneContent: function(parent) {
+        prepareSingleGeneContent: function (parent) {
             return this.content =
                 dcc_createNode(parent, 'div', null, 'dcc-heatmap-content');
         },
-
         /**
          * We use a breadcum UI to display the depth of the annotation. For
          * instance, viewing annotations for a specific procedure is deeper than
@@ -1359,7 +1410,7 @@
          * @param {String} key Unique node identifier in the hierarchical tree.
          * @param {String} label Node label to showSlider in navigation bar.
          */
-        pushBreadcrum: function(key, label) {
+        pushBreadcrum: function (key, label) {
             var me = this, count = me.breadcrums.length;
 
             /* find the breadcrum starting at the top of the breadcrum stack */
@@ -1379,21 +1430,19 @@
 
             me.updateNavigationBar();
         },
-
         /**
          * Retrieves the HeatMap data retriever for the current key.
          *
          * @param {String} key Unique node identifier in the hierarchical tree.
          * @param {String} label Node label to show in breadcrum navigator.
          */
-        getHeatmapRetriever: function(key, label) {
+        getHeatmapRetriever: function (key, label) {
             var me = this;
-            return function() {
+            return function () {
                 me.type = key;
                 me.retrieveSingleGeneData(key, label);
             };
         },
-
         /**
          * Creates a checkbox.
          *
@@ -1401,14 +1450,18 @@
          * @param {String} label Label to showSlider against the checkbox.
          * @param {Boolean} selected Is the checkbox initially selected.
          * @param {Function} onclick Processing to do after mouse click.
+         * @param {String} hint Tooltip hint to display.
          *
          * @return {Object} The newly created checkbox node.
          */
-        createCheckbox: function(parent, label, selected, onclick) {
+        createCheckbox: function (parent, label, selected, onclick, hint) {
             var cls = 'dcc-heatmap-checkbox-',
                 selectedCls = cls + 'selected',
                 unselectedCls = cls + 'unselected',
                 checkbox = dcc_createNode(parent, 'div', null, null, label);
+
+            if (hint)
+                dcc_attr(checkbox, 'title', hint);
 
             if (selected) {
                 checkbox.isSelected = true;
@@ -1419,7 +1472,7 @@
             }
             checkbox.className = cls;
 
-            checkbox.onclick = function(event) {
+            checkbox.onclick = function (event) {
                 if (checkbox.isSelected) {
                     checkbox.isSelected = false;
                     checkbox.className = unselectedCls;
@@ -1433,7 +1486,6 @@
 
             return checkbox;
         },
-
         /**
          * This function is invoked when the user customises the heatmap by
          * seleting colours for significant and insignificant annotations
@@ -1442,7 +1494,7 @@
          * @param {Object} event Event when user click on the colour selector.
          * @param {type} colour The colour that was selected by clicking.
          */
-        selectColour: function(event, colour) {
+        selectColour: function (event, colour) {
             var me = this;
             switch (me.colourBoxIndex) {
                 case 0:
@@ -1463,7 +1515,6 @@
             me.hideColourPicker();
             me.prepareColours();
         },
-
         /**
          * When the user hovers over the heatmap legends, a colour picker is
          * displayed. This contains an array of preset colours. This function
@@ -1473,14 +1524,13 @@
          * @param {String} colour What colour to select when clicked on.
          * @returns {Function} Event handler to invoke when user clicks on cell.
          */
-        getColourSelector: function(colour) {
+        getColourSelector: function (colour) {
             var me = this;
-            return function(event) {
+            return function (event) {
                 me.selectColour(dcc_getEvent(event), colour);
                 me.updatePvalueSections();
             };
         },
-
         /**
          * When a user hovers over the heatmap legends, a colour picker is
          * displayed. The following functions prepares this colours picker.
@@ -1488,15 +1538,15 @@
          * @param {Object} parent DOM node that contains the colour picker.
          * @returns {Object} DOM node that represents the colour picker.
          */
-        createColourPicker: function(parent) {
+        createColourPicker: function (parent) {
             var me = this, i, j, td, c = 0, colour,
-                colourGridNumColumns = 4, colourGridNumRows = 5, 
+                colourGridNumColumns = 4, colourGridNumRows = 5,
                 fragment = document.createDocumentFragment(),
                 colourPicker = dcc_createNode(fragment, 'div', null,
-                'dcc-heatmap-colour-picker'),
+                    'dcc-heatmap-colour-picker'),
                 tbody = dcc_createNode(dcc_createNode(colourPicker, 'table'), 'tbody');
 
-            colourPicker.onmouseover = function(event) {
+            colourPicker.onmouseover = function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
             };
@@ -1517,20 +1567,19 @@
             parent.appendChild(fragment);
 
             /* hide colour picker handler */
-            parent.onmouseover = function() {
+            parent.onmouseover = function () {
                 me.hideColourPicker();
                 me.colourBoxIndex = undefined;
             };
 
             return me.colourPicker = colourPicker;
         },
-
         /**
          * Displays the colour picker by placing it relative to the legend box.
          * 
          * @param {Object} event The hovering event that initiated the display.
          */
-        showColourPicker: function(event) {
+        showColourPicker: function (event) {
             var me = this, node = event.target, x, y,
                 displacement = 10; /* so that mouse pointer is on top */
             if (dcc.ie8) {
@@ -1544,12 +1593,10 @@
             dcc_top(me.colourPicker, y);
             dcc_style(me.colourPicker, 'visibility', 'visible');
         },
-
-        hideColourPicker: function() {
+        hideColourPicker: function () {
             var me = this;
             dcc_style(me.colourPicker, 'visibility', 'hidden');
         },
-
         /**
          * The heatmap displays a list of legends that specify the colour
          * that is used to identify significant or insignificant annotations.
@@ -1561,7 +1608,7 @@
          * @param {Integer} index The current colour used to identify type.
          * @returns {Object} DOM node that represents the legend colour box.
          */
-        createLegend: function(parent, label, type, index) {
+        createLegend: function (parent, label, type, index) {
             var me = this, cls = 'dcc-heatmap-toolbar-legend-',
                 legends = dcc_createNode(parent, 'div',
                     null, 'dcc-heatmap-toolbar-legend'),
@@ -1570,7 +1617,7 @@
 
             dcc_createNode(legends, 'div', null, cls + 'label', label);
             if (index !== undefined) {
-                colourBox.onmouseover = function(event) {
+                colourBox.onmouseover = function (event) {
                     event = dcc_getEvent(event);
                     dcc_preventEventBubbling(event);
                     me.showColourPicker(event);
@@ -1579,13 +1626,12 @@
             }
             return colourBox;
         },
-
         /**
          * Appends a legend to the list of legends currently displayed.
          * 
          * @param {Object} parent Parent DOM node that contains the legends.
          */
-        appendLegends: function(parent) {
+        appendLegends: function (parent) {
             var me = this;
             me.significant =
                 me.createLegend(parent, 'Significant', 'significant', 0);
@@ -1594,14 +1640,81 @@
             dcc_style(me.createLegend(parent, 'No data', 'nodata'),
                 'cursor', 'default');
         },
+        appendDownloaders: function (parent) {
+            var me = this, container, all, sig, inc, help;
 
+            container = dcc_createNode(parent, 'div',
+                null, 'dcc-heatmap-toolbar-downloader-container');
+            inc = me.createCheckbox(container,
+                'Include baseline', false,
+                function () {
+                    me.includeBaseline = !me.includeBaseline;
+                }, 'Download takes a lot longer when\nbaseline measurements are included');
+
+            all = dcc_createNode(container, 'div', null, 'dcc-heatmap-toolbar-downloader-all', 'Download all'),
+                sig = dcc_createNode(container, 'div', null, 'dcc-heatmap-toolbar-downloader-significant', 'Download significant');
+            help = dcc_createNode(container, 'div', null, 'dcc-heatmap-toolbar-downloader-help', 'Help'),
+                dcc_attr(all, 'title', 'Download measurements for all parameters');
+            dcc_attr(sig, 'title', 'Download measurements for all significant\nparameters under the current p-value threshold');
+            dcc_attr(help, 'title', 'User manual that describes the response and\nhow the measurements should be interpreted');
+
+
+            all.onclick = function () {
+                window.open(REST_ACCESS_POINT + me.mgiId + '&pvalueThreshold=1'
+                    + '&includeBaseline=' + me.includeBaseline);
+            };
+            sig.onclick = function () {
+                window.open(REST_ACCESS_POINT + me.mgiId + '&pvalueThreshold='
+                    + me.pvalueThreshold + '&includeBaseline='
+                    + me.includeBaseline);
+            };
+            help.onclick = function () {
+                window.open('/phenoview/download.html');
+            };
+        },
+        /**
+         * Appends legends to explain the cells and popup.
+         * 
+         * @param {Object} parent Parent DOM node that contains the legends.
+         */
+        appendMeanings: function (parent) {
+            var me = this, addMeaning = function (cls, label, icon, title) {
+                var node =
+                    dcc_createNode(parent, 'div', null, 'dcc-heatmap-toolbar-legend');
+                dcc_createNode(node, 'div', null, cls, icon);
+                dcc_createNode(node, 'div', null, 'legends-meaning', label);
+                node.setAttribute('title', title);
+            }, top = dcc_createNode(parent, 'div', null, 'dcc-top-legends'),
+                middle = dcc_createNode(parent, 'div', null, 'dcc-middle-legends'),
+                bottom = dcc_createNode(parent, 'div', null, 'dcc-bottom-legends');
+            parent = top;
+            addMeaning('legends-hit', 'Phenodeviance detected', '', 'At least one of the parameters under\nthis category detected zygosity phenodeviance');
+            addMeaning('legends-nohit', 'No phenodeviance detected', '', 'None of the parameters under\nthis category detected zygosity phenodeviance');
+            addMeaning('legends-zyg', 'Homozygous', 'Hom', 'There is homozygous annotation');
+            addMeaning('legends-zyg', 'Heterozygous', 'Het', 'There is heterozygous annotation');
+            addMeaning('legends-zyg', 'Hemizygous', 'Hem', 'There is hemizygous annotation');
+            addMeaning('legends-sex', 'Sexual dimorphism', '', 'There is sexual dimorphism annotation');
+            parent = middle;
+            addMeaning('legends-popup-hit', 'Zygosity phenodeviance', '', 'Phenodeviance detected for this zygosity and parameter');
+            addMeaning('legends-popup-nohit', 'No zygosity phenodeviance', '', 'No phenodeviance detected for this zygosity and parameter');
+            addMeaning('legends-popup-sex-hit', 'Sexual dimorphism detected', '', 'Sexual dimorphism detected for this\nzygosity and parameter');
+            addMeaning('legends-popup-sex-nohit', 'No sexual dimorphism detected', '', 'No sexual dimorphism detected for\nthis zygosity and parameter');
+            parent = bottom;
+            me.appendLegends(parent);
+            /*
+             * The databases are too slow for this service, and I cannot change
+             * them without lots of discussions!
+             *
+            me.appendDownloaders(parent);
+            */
+        },
         /**
          * The navigation bar is displayed at the top of the heatmap. It
          * contains the breadcrum UI and ontological/procedural mode switcher.
          * This function updates the navigation bar when the depth of the
          * annotation level changes, or when the mode is switched.
          */
-        updateNavigationBar: function() {
+        updateNavigationBar: function () {
             var me = this, i = 0, n = me.breadcrums.length, datum, temp,
                 fragment = document.createDocumentFragment(),
                 crumPrefix = 'dcc-heatmap-breadcrum-',
@@ -1611,7 +1724,7 @@
 
             if (me.title) {
                 dcc_createNode(fragment, 'div', null,
-                    crumPrefix + 'gene', me.title);
+                    crumPrefix + 'gene', me.title + ' : Adult');
                 dcc_createNode(fragment, 'div', null,
                     crumPrefix + 'gene-separator');
             }
@@ -1633,14 +1746,14 @@
             me.procedural = dcc_createNode(fragment, 'div', null,
                 me.isOntological ? inactive : active, 'Procedural');
 
-            dcc_handleEvent(me.ontological, 'click', function() {
+            dcc_handleEvent(me.ontological, 'click', function () {
                 if (me.isOntological)
                     return;
                 dcc_class(me.procedural, inactive);
                 dcc_class(me.ontological, active);
                 me.changeMode();
             });
-            dcc_handleEvent(me.procedural, 'click', function() {
+            dcc_handleEvent(me.procedural, 'click', function () {
                 if (!me.isOntological)
                     return;
                 dcc_class(me.ontological, inactive);
@@ -1649,16 +1762,15 @@
             });
 
             dcc_handleEvent(dcc_createNode(fragment, 'div', null,
-                crumPrefix + 'help', 'Help'), 'click', function(event) {
+                crumPrefix + 'help', 'Help'), 'click', function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
-                window.open(me.jssrc + '../manual.html', '_self');
+                window.open(me.jssrc + '../manual.html');
             });
 
             dcc_removeChildrenSubtrees(me.breadcrumsNode);
             me.breadcrumsNode.appendChild(fragment);
         },
-
         /**
          * This prepares the heatmap toolbar which contains the breadcrum
          * navigator, annotation legends and the p-value selection tools. 
@@ -1666,22 +1778,23 @@
          * @param {Object} parent Parent DOM node.
          * @returns {Object} Toolbar DOM node.
          */
-        prepareToolbar: function(parent) {
+        prepareToolbar: function (parent) {
             var me = this, p = 'dcc-heatmap-toolbar-',
-                genes = dcc_createNode(parent, 'div', null, 'dcc-heatmap-genes'),
+                pvalueThreshold = getCookie('phenodcc_heatmap_pvalue_threshold'),
                 toolbar = dcc_createNode(parent, 'div', null, p + 'toolbar'),
                 breadcrums = dcc_createNode(toolbar, 'div', null, p + 'breadcrums'),
                 legends = dcc_createNode(toolbar, 'div', null, p + 'legends'),
                 pvalueTools = dcc_createNode(toolbar, 'div', null, p + 'pvaluetools'),
                 sliderOnValueChangeHandler =
-                function() {
+                function () {
                     me.pvalueThreshold = me.pValueSlider.getSliderValue();
+                    setCookie('phenodcc_heatmap_pvalue_threshold', me.pvalueThreshold);
                     me.updatePvalueSections();
                 };
 
             me.showpValueGradient = me.createCheckbox(pvalueTools,
                 'Show gradient', false,
-                function() {
+                function () {
                     if (me.showpValueGradient.isSelected)
                         me.pValueSlider.hideSlider();
                     else
@@ -1689,53 +1802,72 @@
                     me.updatePvalueSections();
                 });
 
+            pvalueThreshold = parseFloat(pvalueThreshold);
+            if (isNaN(pvalueThreshold) || pvalueThreshold < 0.0 || pvalueThreshold > 1.0)
+                pvalueThreshold = DEFAULT_PVALUE_THRESHOLD;
+
             me.pValueSlider = new Slider(pvalueTools,
                 'p-value-slider',
                 'p-value threshold:',
                 0.0, 1.0, 50, 500,
-                function() {
+                function () {
                     dcc_throttle(sliderOnValueChangeHandler, 50, me);
-                }, 0.0001);
+                }, pvalueThreshold, DEFAULT_PVALUE_THRESHOLD);
             me.pvalueThreshold = me.pValueSlider.valueFromPosition();
 
-            me.geneDetails = genes;
-            me.legends = me.appendLegends(legends);
+            me.appendMeanings(legends);
             me.breadcrumsNode = breadcrums;
             me.updateNavigationBar();
 
             return me.toolbar = toolbar;
         },
-
         /**
          * Creates heatmap user interface inside the supplied parent DOM node.
          *
          * @param {Object} parent Container DOM node.
          */
-        createInterface: function(parent) {
+        createInterface: function (parent) {
             var me = this;
             me.prepareToolbar(parent);
             me.prepareSingleGeneContent(parent);
             return parent;
         },
-
-        destroyInterface: function(parent) {
+        destroyInterface: function (parent) {
             dcc_removeChildrenSubtrees(parent);
         },
-
         /**
-         * Round p-value to required precision.
+         * Round p-values to required precision.
+         *
+         * @param {Object} p Object that contains the p-values.
+         *
+         * @returns {Real} Floating point value.
+         */
+        pvaluePrecision: function (p) {
+            var me = this;
+            return {
+                'v': dcc_precision(me.pvalueExtractor(p, 'v')), /* overall p-value */
+                'o': dcc_precision(me.pvalueExtractor(p, 'o')), /* homozygous */
+                'e': dcc_precision(me.pvalueExtractor(p, 'e')), /* heterozygous */
+                'm': dcc_precision(me.pvalueExtractor(p, 'm')), /* hemizygous */
+                's': dcc_precision(me.pvalueExtractor(p, 's')), /* sexual dimorphism */
+                'os': dcc_precision(me.pvalueExtractor(p, 'os')), /* homozygous sexual dimorphism */
+                'es': dcc_precision(me.pvalueExtractor(p, 'es')), /* heterozygous sexual dimorphism */
+                'ms': dcc_precision(me.pvalueExtractor(p, 'ms')) /* hemizygous sexual dimorphism */
+            };
+        },
+        /**
+         * Round p-values to required precision.
          *
          * @param {Integer} row Row index for the data.
          * @param {Integer} column Column index for the data.
          *
          * @returns {Real} Floating point value.
          */
-        pvaluePrecision: function(row, column) {
+        rowColPvaluePrecision: function (row, column) {
             var me = this;
-            return me.dataPvalues[row][column].v =
-                dcc_precision(me.pvalueExtractor(me.dataPvalues[row][column]));
+            return me.dataPvalues[row][column] =
+                me.pvaluePrecision(me.dataPvalues[row][column]);
         },
-
         /**
          * Converts the supplied p-value into the corresponding gradient colour
          * for one of the possible cell states (normal, or, highlighted.
@@ -1754,7 +1886,7 @@
          * @param {Real} value The p-value to convert.
          * @param {Boolean} isHighlighted Is the cell to be painted highlighted?
          */
-        getPvalueGradientColour: function(value, isHighlighted) {
+        getPvalueGradientColour: function (value, isHighlighted) {
             var me = this, channels,
                 /* scale p-value to range [0, 1] */
                 scaled = (value - me.dataMinValue) / me.dataValueRange;
@@ -1764,14 +1896,13 @@
              * p-values mean higher significance) */
             channels = isHighlighted
                 ? dcc_getGradientColor(me.highlightedSignificantColourChannels,
-                me.highlightedInsignificantColourChannels, scaled)
+                    me.highlightedInsignificantColourChannels, scaled)
                 : dcc_getGradientColor(me.significantColourChannels,
-                me.insignificantColourChannels, scaled);
+                    me.insignificantColourChannels, scaled);
 
             /* convert channels to hexadecimal value */
             return dcc_convertChannelsToHexColour(channels);
         },
-
         /**
          * The heatmap might display multiple alleles for the same gene. Hence,
          * we must find a way to distinguish between multiple versions of the
@@ -1782,7 +1913,7 @@
          * @param {Object} lines Get the list of lines to display in heatmap.
          * @returns {Object} Boolean flags to mark fields that are different.
          */
-        checkWhatFieldsAredifferent: function(lines) {
+        checkWhatFieldsAredifferent: function (lines) {
             var i, c = lines.length, line,
                 differentAllele = 0, differentStrain = 0, differentCentre = 0,
                 currentAllele, currentStrain, currentCentre;
@@ -1815,13 +1946,12 @@
                 'centre': differentCentre
             };
         },
-
         /**
          * Proper row headers based on proper discussion. Details at:
          * 
          * http://confluence/pages/viewpage.action?pageId=14025316
          */
-        generateRowIdentifiers: function() {
+        generateRowIdentifiers: function () {
             var me = this, lines = me.dataColumnHeaders, i, c = lines.length,
                 diff, line, allele, shortAllele, strain, centre, ilar, temp,
                 maxNumChars = 32;
@@ -1887,13 +2017,12 @@
                 }
             }
         },
-
         /**
          * Pre-processes the two-dimensional p-values array before rendering the
          * heat map. This allows us to set the extremes of the colour gradient
          * to match the bounding p-values.
          */
-        processData: function() {
+        processData: function () {
             var me = this, i, j, nr, nc, pvalue, min, max;
 
             /* @TODO: should try to remember appropriate pegs */
@@ -1909,7 +2038,7 @@
 
             for (i = 0; i < nr; ++i)
                 for (j = 0; j < nc; ++j) {
-                    pvalue = me.dataPvalues[i][j];
+                    pvalue = me.dataPvalues[i][j].v; /* using overall p-value */
                     if (pvalue < 0)
                         continue;
                     if (pvalue < min)
@@ -1924,7 +2053,6 @@
             me.dataValueRange = me.dataMaxValue - me.dataMinValue;
             me.generateRowIdentifiers();
         },
-
         /**
          * Retrieves the data object from the server response.
          * 
@@ -1932,7 +2060,7 @@
          * @param {String} name Name of the data field to extract.
          * @returns {Object} Field value.
          */
-        getDataObject: function(data, name) {
+        getDataObject: function (data, name) {
             var obj = null;
             if (typeof data[name] === 'undefined')
                 dcc_reportError("Missing 'row_headers' object/attribute in data");
@@ -1940,14 +2068,13 @@
                 obj = data[name];
             return obj;
         },
-
         /**
          * Retrieves heatmap data from the server response.
          * 
          * @param {Object} data Response object from the server.
          * @returns {Object} Heatmap data.
-         */        
-        extractHeatmapData: function(data) {
+         */
+        extractHeatmapData: function (data) {
             var me = this, rowHeaders, columnHeaders, pvalues;
             if (typeof data.heatmap === 'undefined')
                 dcc_reportError("Missing 'heatmap' object in data");
@@ -1970,7 +2097,6 @@
             }
             return false;
         },
-
         /**
          * Checks if the heatmap data returned by the server is valid. If valid,
          * return the heatmap data object.
@@ -1978,7 +2104,7 @@
          * @param {Object} data Response object from the server.
          * @returns {Object|Boolean} Data object if valid; otherwise, false.
          */
-        retrieveDataIfValid: function(data) {
+        retrieveDataIfValid: function (data) {
             var me = this, success;
             if (data === undefined)
                 dcc_reportError('Server returned invalid data');
@@ -1993,12 +2119,11 @@
             }
             return false;
         },
-
         /**
          * This function displays a list of all the genes and its variants at
          * the top of the heatmap.
          */
-        fillGeneDetails: function() {
+        fillGeneDetails: function () {
             var me = this, genesDetails = me.geneDetails, table, temp, tr, g,
                 genes = me.dataColumnHeaders, i, c = genes.length;
             dcc_removeChildrenSubtrees(genesDetails);
@@ -2025,30 +2150,27 @@
                 dcc_createNode(tr, 'td', null, null, g.c);
             }
         },
-
         /**
          * Displays notification when data is being loaded.
          * 
          * @param {Object} node DOM node that will contain the notification.
          * @param {String} msg The message to display in the notification.
          */
-        showLoadingNotification: function(node, msg) {
+        showLoadingNotification: function (node, msg) {
             dcc_removeChildrenSubtrees(node);
             dcc_createNode(node, 'div', null,
                 'dcc-heatmap-loading',
                 "<div></div><span>" + msg + "</span>"
                 );
         },
-
         /**
          * Hides notification when data has finished loading.
          * 
          * @param {Object} node DOM node that will contain the notification.
          */
-        hideLoadingNotification: function(node) {
+        hideLoadingNotification: function (node) {
             dcc_removeChildrenSubtrees(node);
         },
-
         /**
          * Retrieves data for a single gene. Note that the gene may have
          * multiple variants with, say different alleles, centres etc. This
@@ -2057,7 +2179,7 @@
          * @param {String} key The key which identifies the phenotype group.
          * @param {String} label What label should go into the breadcrum.
          */
-        retrieveSingleGeneData: function(key, label) {
+        retrieveSingleGeneData: function (key, label) {
             var me = this;
             if (me.mgiId === undefined)
                 dcc_reportError('MGI identifier must be defined');
@@ -2066,18 +2188,19 @@
                 dcc_get(me.heatmapUrl + '?'
                     + (me.mgiId === undefined ? '' : 'mgiid=' + me.mgiId)
                     + (me.type === undefined ? '' : '&type=' + me.type),
-                    function(data) {
+                    function (data) {
                         if (me.retrieveDataIfValid(data)) {
                             me.hideLoadingNotification(me.content);
                             me.processData();
                             me.fillGeneDetails();
                             me.renderPvalueGrid();
                             me.pushBreadcrum(key, label);
+                            setCookie('phenodcc_heatmap_key', key);
+                            setCookie('phenodcc_heatmap_label', label);
                         }
                     });
             }
         },
-
         /**
          * Updates the p-value cells that are currently displayed in the
          * heatmap. The colour of the cells are dependent on the colouring mode.
@@ -2086,7 +2209,7 @@
          * disabled, we use the p-value threshold to choose either the
          * significant or the insignificant colour.
          */
-        updatePvalueSections: function() {
+        updatePvalueSections: function () {
             var me = this, tds = me.pvalueSections,
                 i, c, pvalue, td, noData = 'dcc-heatmap-nodata';
 
@@ -2098,26 +2221,51 @@
                     td = tds[i];
                     pvalue = td.pvalue;
                     td = td.node;
-
-                    if (pvalue === undefined)
+                    me.addIconsForPvalues(td, pvalue);
+                    if (pvalue === undefined
+                        || pvalue.v === undefined
+                        || pvalue.s === undefined)
                         dcc_class(td, noData);
                     else
-                        dcc_bg(td, me.getPvalueGradientColour(pvalue));
+                        dcc_bg(td, me.getPvalueGradientColour(pvalue.v));
                 }
             else
                 for (i = 0, c = tds.length; i < c; ++i) {
                     td = tds[i];
                     pvalue = td.pvalue;
                     td = td.node;
-
-                    if (pvalue === undefined)
+                    me.addIconsForPvalues(td, pvalue);
+                    if (pvalue === undefined
+                        || pvalue.v === undefined
+                        || pvalue.s === undefined)
                         dcc_class(td, noData);
                     else
-                        dcc_bg(td, pvalue < me.pvalueThreshold ?
+                        dcc_bg(td, pvalue.v < me.pvalueThreshold
+                            || pvalue.s < me.pvalueThreshold ?
                             me.significantColour : me.insignificantColour);
                 }
         },
-
+        /* Returns visualisation setting to intialise Phenoview appropriately. */
+        getControlSetting: function (pvalues) {
+            var me = this, controlSetting = SETTINGS_WITHOUT_ZYGOSITY, i = 0;
+            if (pvalues !== undefined) {
+                if (pvalues.o < me.pvalueThreshold) {
+                    controlSetting |= SHOW_HOM;
+                    ++i;
+                }
+                if (pvalues.e < me.pvalueThreshold) {
+                    controlSetting |= SHOW_HET;
+                    ++i;
+                }
+                if (pvalues.m < me.pvalueThreshold) {
+                    controlSetting |= SHOW_HEM;
+                    ++i;
+                }
+            }
+            if (i !== 1)
+                controlSetting |= SHOW_ALL_ZYGOSITIES;
+            return controlSetting;
+        },
         /**
          * This event handler is invoked when a user clicks on one of the
          * rows that are currently displayed inside the details popup.
@@ -2126,16 +2274,22 @@
          * @param {Boolean} isOntological Is the heatmap in ontological or
          *     procedural mode.
          */
-        getPopupRowOnClickHandler: function(datum, isOntological) {
+        getPopupRowOnClickHandler: function (datum, isOntological) {
             var me = this;
-            return function(event) {
+            return function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
-                window.open(me.viz(me.popupGid,
-                    isOntological ? datum.m : datum.k), '_self');
+                window.open(me.viz(me.popupGid, datum.k, me.getControlSetting(datum.s), me.pvalueThreshold));
             };
         },
-
+        getPopupToolbarOnClickHandler: function (qeid) {
+            var me = this;
+            return function (event) {
+                event = dcc_getEvent(event);
+                dcc_preventEventBubbling(event);
+                window.open(me.viz(me.popupGid, qeid, me.getControlSetting(), me.pvalueThreshold));
+            };
+        },
         /**
          * This prepares the details to be display inside a details popup dialog.
          * 
@@ -2145,19 +2299,46 @@
          *     procedural mode.
          * @returns {Object} DOM node that contains the popup details.
          */
-        preparePhenotypeTable: function(content, data, isOntological) {
+        preparePhenotypeTable: function (content, data, isOntological) {
             var me = this, c = data.length, i, tr, td, datum, icon, outcome,
                 classPrefix = 'dcc-heatmap-popup-',
                 popupContent = dcc_createNode(content, 'div',
-                null, classPrefix + 'details'),
+                    null, classPrefix + 'details'),
                 tbody =
-                dcc_createNode(dcc_createNode(popupContent, 'table'), 'tbody');
-            
+                dcc_createNode(dcc_createNode(popupContent, 'table'), 'tbody'),
+                addPvalue = function (parent, classPrefix, pvalue, label, sexPvalue) {
+                    if (pvalue !== undefined && pvalue !== -1) {
+                        dcc_createNode(parent, 'div', null, classPrefix + 'pvalue-label', label + ':');
+                        dcc_createNode(parent, 'div', null, classPrefix + 'pvalue-' + (pvalue < me.pvalueThreshold ? 'hit' : 'nohit'));
+                        if (sexPvalue !== undefined && sexPvalue !== -1)
+                            dcc_createNode(parent, 'div', null, classPrefix + 'sex-pvalue-' + (sexPvalue < me.pvalueThreshold ? 'hit' : 'nohit'));
+                        dcc_createNode(parent, 'div', null, classPrefix + 'pvalue-value', (label === 'Sex' ? '' : pvalue));
+                    }
+                },
+                addAnnotation = function (tr, datum) {
+                    var td = dcc_createNode(tr, 'td', null, classPrefix + 'i'),
+                        icon, pvalues = datum.s,
+                        showAnnotation = (pvalues.o < me.pvalueThreshold
+                            || pvalues.e < me.pvalueThreshold
+                            || pvalues.m < me.pvalueThreshold);
+                    if (showAnnotation) {
+                        icon = dcc_createNode(td, 'div');
+                        dcc_createNode(tr, 'td', null, classPrefix + 't', datum.t);
+                    } else {
+                        dcc_createNode(tr, 'td', null, classPrefix + 't-light', 'n/a');
+                    }
+                    if (showAnnotation) {
+                        outcome = dcc_getSelectionOutcomeIconClass(datum.o);
+                        if (outcome !== null)
+                            dcc_class(icon, outcome);
+                    }
+                };
+
             if (isOntological)
                 classPrefix += 'ont-';
-            
+
             for (i = 0; i < c; ++i) {
-                data[i].p = dcc_precision(data[i].p);
+                data[i].s = me.pvaluePrecision(data[i].s);
                 datum = data[i];
                 tr = dcc_createNode(tbody, 'tr', null,
                     classPrefix + (i % 2 ? 'even' : 'odd') + ' clickable');
@@ -2165,18 +2346,16 @@
                 if (isOntological)
                     dcc_createNode(tr, 'td', null, classPrefix + 'p', datum.a);
                 dcc_createNode(tr, 'td', null, classPrefix + 'q', datum.n);
-                td = dcc_createNode(tr, 'td', null, classPrefix + 'i');
-                icon = dcc_createNode(td, 'div');
-                dcc_createNode(tr, 'td', null, classPrefix + 't', datum.t);
-                dcc_createNode(tr, 'td', null, classPrefix + 'v', datum.p);
-
-                outcome = dcc_getSelectionOutcomeIconClass(datum.o);
-                if (outcome !== null)
-                    dcc_class(icon, outcome);
+                addAnnotation(tr, datum);
+                td = dcc_createNode(tr, 'td', null, classPrefix + 'v');
+                if (datum.s !== undefined) {
+                    addPvalue(td, classPrefix, datum.s.o, 'Hom', datum.s.os);
+                    addPvalue(td, classPrefix, datum.s.e, 'Het', datum.s.es);
+                    addPvalue(td, classPrefix, datum.s.m, 'Hem', datum.s.ms);
+                }
             }
             return popupContent;
         },
-
         /**
          * Prepares the popup. This brings in the correct popup details header
          * and the rows of phenotype annotations to be displayed.
@@ -2184,7 +2363,7 @@
          * @param {Object} data Contains data to display inside the popup.
          * @returns {Object} DOM node that contains the popup.
          */
-        preparePopupContent: function(data) {
+        preparePopupContent: function (data) {
             var me = this, content = document.createDocumentFragment(),
                 isOntological;
             if (typeof data.details === undefined)
@@ -2195,17 +2374,17 @@
                 data = data.details;
                 if (data.length > 0) {
                     isOntological = data[0].a !== undefined;
+                    dcc_preparePopupToolbar(me, content, data);
                     dcc_preparePopupHeader(content, isOntological);
                     content.popupContent =
                         me.preparePhenotypeTable(content, data, isOntological);
                 } else
                     dcc_createNode(content, 'div', null,
-                    'dcc-heatmap-popup-info',
-                    'No significant parameters under current p-value threshold');
+                        'dcc-heatmap-popup-info',
+                        'No significant parameters under current p-value threshold');
             }
             return content;
         },
-
         /**
          * Returns an event handler for events when user hovers mouse over
          * a p-value cell.
@@ -2215,9 +2394,9 @@
          *     parameter or an ontology parameter)
          * @returns {Function} Event handler.
          */
-        getCellOnMouseoverHandler: function(gid, type) {
+        getCellOnMouseoverHandler: function (gid, type) {
             var me = this;
-            return function(event) {
+            return function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
 
@@ -2239,11 +2418,11 @@
                 me.updatePopupContent();
                 dcc_get(me.detailsUrl
                     + (!me.isOntological && isNaN(parseInt(type))
-                    ? '/parameter' : '')
+                        ? '/parameter' : '')
                     + (gid === undefined ? '' : '?gid=' + gid)
                     + '&type=' + type
                     + '&threshold=' + me.pvalueThreshold,
-                    function(data) {
+                    function (data) {
                         /* is mouse pointer still on the cell that triggered
                          * this Ajax call? Note that entering a cell resets
                          * these two values. */
@@ -2256,39 +2435,60 @@
                     });
             };
         },
-
         /**
          * Returns an event handler for events when user moves the mouse over
          * a p-value cell.
          * 
          * @returns {Function} Event handler.
          */
-        getCellOnMousemoveHandler: function() {
+        getCellOnMousemoveHandler: function () {
             var me = this;
-            return function(event) {
+            return function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
                 me.movePopup(event);
             };
         },
-
         /**
          * Returns an event handler for events when user clicks on
          * a p-value cell.
          * 
          * @param {Integer} row Cell row.
          * @param {Integer} col Cell column.
+         * @param {Real} pvalues p-values for the cell.
          * @returns {Function} Event handler.
          */
-        getCellOnClickHandler: function(row, col) {
+        getCellOnClickHandler: function (row, col, pvalues) {
             var me = this;
-            return function(event) {
+            return function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
-                window.open(me.viz(row, col), '_self');
+                window.open(me.viz(row, col, me.getControlSetting(pvalues), me.pvalueThreshold));
             };
         },
-
+        /**
+         * Adds icons that corresponds to the p-values: overall p-value,
+         * homozygous p-value, heterozygous p-value and sexual dimorphism.
+         * 
+         * @param {Object} cell DOM node that represents the parent cell.
+         * @param {Object} pvalue Contains the four p-values.
+         */
+        addIconsForPvalues: function (cell, pvalue) {
+            if (cell)
+                dcc_removeChildrenSubtrees(cell);
+            var me = this, getIconClass = function (type, value) {
+                return 'pvalue-icon-' + type
+                    + (value < me.pvalueThreshold ? '-hit' : '-nohit');
+            };
+            if (pvalue.o !== undefined)
+                dcc_createNode(cell, 'div', null, getIconClass('hom', pvalue.o), 'Hom');
+            if (pvalue.e !== undefined)
+                dcc_createNode(cell, 'div', null, getIconClass('het', pvalue.e), 'Het');
+            if (pvalue.m !== undefined)
+                dcc_createNode(cell, 'div', null, getIconClass('hem', pvalue.m), 'Hem');
+            if (pvalue.s !== undefined)
+                dcc_createNode(cell, 'div', null, getIconClass('sex', pvalue.s), '');
+        },
         /**
          * The heatmap cell display is divided into sections. Each section
          * consists of phenotype headers followed by p-value cell rows for
@@ -2302,12 +2502,12 @@
          * @param {Integer} numColonies Number of colonies corresponds to the
          *     gene variants.
          */
-        fillSection: function(rows, columns, start, count, padding, numColonies) {
+        fillSection: function (rows, columns, start, count, padding, numColonies) {
             var me = this, fragment = document.createDocumentFragment(),
                 section = dcc_createNode(fragment, 'table',
-                null, 'dcc-heatmap-section'),
+                    null, 'dcc-heatmap-section'),
                 header = dcc_createNode(dcc_createNode(section, 'thead'), 'tr',
-                null, 'dcc-heatmap-section-column-headers'),
+                    null, 'dcc-heatmap-section-column-headers'),
                 body = dcc_createNode(section, 'tbody'), rowHeader,
                 type, col, i, j, k, pvalue, tr, td, tds = me.pvalueSections;
 
@@ -2330,7 +2530,7 @@
                 }
                 dcc_class(td, 'clickable');
             }
-            
+
             /* fill in empty cells for unoccupied p-value cells */
             for (i = 0; i < padding; ++i)
                 dcc_createNode(header, 'th');
@@ -2342,34 +2542,33 @@
                 tr = dcc_createNode(body, 'tr');
                 rowHeader = me.columnFormatter(rows[i]);
                 dcc_createNode(tr, 'td', null,
-                'dcc-heatmap-section-row-headers', rowHeader);
+                    'dcc-heatmap-section-row-headers', rowHeader);
                 for (j = 0, k = start; j < count; ++j, ++k) {
                     col = columns[k];
-                    pvalue = me.pvaluePrecision(k, i);
-                    td = dcc_createNode(tr, 'td', null, null, pvalue);
+                    pvalue = me.rowColPvaluePrecision(k, i);
+                    td = dcc_createNode(tr, 'td');
                     tds.push({
                         'node': td,
                         'pvalue': pvalue
                     });
                     me.addCellEventHandlers(td, pvalue,
-                    me.keyExtractor(rows[i]), col.type);
+                        me.keyExtractor(rows[i]), col.type);
                 }
             }
             me.pvalueSections = tds;
             me.updatePvalueSections();
             me.content.appendChild(fragment);
-            me.content.onmouseover = function(event) {
+            me.content.onmouseover = function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
                 me.hidePopup(event);
             };
         },
-
         /**
          * Renders the two-dimensional grid of p-value cells by rendring all of
          * the sections to satisfy the procedure/parameter or ontologies.
          */
-        renderPvalueGrid: function() {
+        renderPvalueGrid: function () {
             var me = this, start = 0, count,
                 /* we will display gene/colonies column headers as rows, so that
                  * each row of the section belongs to a gene/colony; and
@@ -2394,36 +2593,40 @@
                     start += count;
                 }
         },
-
         /**
          * View single gene heatmap.
          */
-        viewSingleGene: function() {
-            var me = this;
+        viewSingleGene: function () {
+            var me = this, key = getCookie('phenodcc_heatmap_key'),
+                label = getCookie('phenodcc_heatmap_label'), f;
+            ;
             me.createInterface(me.root);
             me.prepareColours();
-            me.retrieveSingleGeneData();
+            if (key && label) {
+                f = me.getHeatmapRetriever(key, label);
+                f();
+            } else
+                me.retrieveSingleGeneData();
             me.createColourPicker(me.root);
             me.createPopup(me.root);
         },
-
         /**
          * Creates the popup dialog.
          * 
          * @param {Object} parent DOM node that will contain the popup.
          * @returns {Object} DOM object that represents the popup.
          */
-        createPopup: function(parent) {
+        createPopup: function (parent) {
             var me = this, p = 'dcc-heatmap-popup',
                 popup = dcc_createNode(parent, 'div', null, p),
                 content = dcc_createNode(popup, 'div', null, p + '-content'),
                 close = dcc_createNode(popup, 'div', null, p + '-close');
 
-            dcc_handleEvent(popup, 'mouseover', function(event) {
+            dcc_handleEvent(popup, 'mouseover', function (event) {
                 event = dcc_getEvent(event);
                 dcc_preventEventBubbling(event);
             });
-            dcc_handleEvent(close, 'click', function(event) {
+            dcc_handleEvent(close, 'click', function (event) {
                 event = dcc_getEvent(event);
                 me.hidePopup(event);
             });
@@ -2431,13 +2634,12 @@
             popup.popupClose = close;
             return me.popup = popup;
         },
-
         /**
          * Update contents of the popup dialog.
          *
          * @param {Object} content New contents of the popup dialog.
          */
-        updatePopupContent: function(content) {
+        updatePopupContent: function (content) {
             var me = this, node = me.popup.popupContent;
             if (content === undefined)
                 me.showLoadingNotification(node, 'Loading details...');
@@ -2446,7 +2648,6 @@
                 node.appendChild(content);
             }
         },
-
         /**
          * Display the popup dialog with the supplied content
          * relative to the supplied mouse position.
@@ -2455,24 +2656,22 @@
          * @param {type} y y-coordinate of the mouse.
          * @param {type} content New content of the popup.
          */
-        showPopup: function(x, y, content) {
+        showPopup: function (x, y, content) {
             var me = this, popup = me.popup;
             me.updatePopupContent(content);
             dcc_style(popup, 'visibility', 'visible');
             me.movePopup(x, y);
         },
-
         /**
          * Check if the popup dialog has vertical scrollbar displayed.
          *
          * @returns {Boolean} True if scrollbar is visible; otherwise, false.
          */
-        popupHasScroll: function() {
+        popupHasScroll: function () {
             var me = this, popupContent = me.popup.popupContent;
             return popupContent === undefined ? false :
                 dcc_scrollHeight(popupContent) > dcc_height(popupContent);
         },
-
         /**
          * Returns the popup dialog box position relative to the supplied
          * mouse position.
@@ -2481,7 +2680,7 @@
          * @param {type} y y-coordinate of the mouse.
          * @returns {dcc.PhenoHeatMap.prototype.getPopupPosition.Anonym$6}
          */
-        getPopupPosition: function(x, y) {
+        getPopupPosition: function (x, y) {
             var me = this, padding = 50, popup = me.popup, diff,
                 popupWidth = dcc_width(popup),
                 popupHeight = dcc.ie8 ? 0 : dcc_height(popup),
@@ -2503,34 +2702,31 @@
                 'y': y
             };
         },
-
         /**
          * Moves popup relative to supplied mouse position.
          *
          * @param {type} x x-coordinate of the mouse.
          * @param {type} y y-coordinate of the mouse.
          */
-        movePopup: function(x, y) {
+        movePopup: function (x, y) {
             var me = this, popup = me.popup, pos = me.getPopupPosition(x, y);
             dcc_left(popup, pos.x);
             dcc_top(popup, pos.y);
         },
-
         /**
          * Hides the popup box.
          */
-        hidePopup: function() {
+        hidePopup: function () {
             var me = this;
             dcc_style(me.popup, 'visibility', 'hidden');
             me.popupGid = me.popupType = null;
         },
-
         /**
          * Checks if the supplied host div element is valid.
          *
          * @param {String} id Identifier of the parent DOM node.
          */
-        checkHostDivElement: function(id) {
+        checkHostDivElement: function (id) {
             var me = this, parent = document.getElementById(id);
             if (parent === null) {
                 alert('Invalid heatmap host:\nNo DOM node with identifier\'' +
@@ -2540,16 +2736,21 @@
             me.parent = parent;
             return true;
         },
-
         /**
          * Initialises the PhenoDCC Heatmap web application.
          */
-        initialiseHeatmap: function() {
+        initialiseHeatmap: function () {
             var me = this, parent = me.parent;
             me.updateUrls();
             dcc_class(parent, 'phenodcc-heatmap');
+            me.geneDetails = dcc_createNode(parent, 'div', null, 'dcc-heatmap-genes');
+            me.embryo = dcc_createNode(parent, 'div', 'dcc-heatmap-embryo');
+            new dcc.EmbryoHeatmap({
+                'id': 'dcc-heatmap-embryo',
+                'mgiid': me.mgiId
+            });
             me.root = dcc_createNode(parent, 'div', null, 'dcc-heatmap-root');
-            dcc_handleEvent(me.root, 'touchstart', function(event) {
+            dcc_handleEvent(me.root, 'touchstart', function (event) {
                 if (event.touches) {
                     event = event.touches;
                     if (event.length === 2) {
@@ -2558,13 +2759,169 @@
                     }
                 }
             });
-            dcc_handleEvent(dcc_body, 'mouseover', function(event) {
+            dcc_handleEvent(dcc_body, 'mouseover', function (event) {
                 me.hidePopup();
                 me.hideColourPicker();
             });
 
             me.viewSingleGene();
             return true;
+        }
+    };
+
+    dcc.EmbryoHeatmap = function (config) {
+        this.id = config.id;
+        this.parent = document.getElementById(this.id);
+        this.mgiid = config.mgiid;
+        this.init();
+    };
+
+    dcc.EmbryoHeatmap.prototype = {
+        init: function () {
+            var me = this, gid;
+            dcc_get("rest/embryo/summary/" + me.mgiid, function (data) {
+                if (data === undefined || data.length === 0)
+                    return;
+                gid = me.process(data);
+                me.render(gid);
+            });
+        },
+        process: function (data) {
+            var me = this, i, datum, c, p;
+            me.gids = {};
+            me.tabLabels = [];
+            for (i in data) {
+                datum = data[i];
+                if (me.gids[datum.gid] === undefined) {
+                    me.gids[datum.gid] = [];
+                    p = /.*<sup>(.*)<\/sup>/.exec(datum.allele);
+                    me.tabLabels[datum.gid] = {
+                        'c': datum.centre,
+                        'a': datum.allele,
+                        'x': p === null ? datum.allele : p[1]
+                    };
+                }
+                c = me.gids[datum.gid];
+                if (c[datum.num] === undefined)
+                    c[datum.num] = [];
+                p = c[datum.num];
+                if (p[datum.procedureName] === undefined)
+                    p[datum.procedureName] = [];
+                p = p[datum.procedureName];
+                if (p[datum.parameterKey] === undefined)
+                    p[datum.parameterKey] = datum;
+            }
+            return datum.gid;
+        },
+        getPhenoviewHandler: function (data, parameters) {
+            var me = this;
+            return function () {
+                window.open(
+                    '/phenoview/?gid=' + data.gid +
+                    '-' + data.sid + '-' + data.cid + '&qeid='
+                    + (parameters === undefined ? data.parameterKey : parameters));
+            };
+        },
+        getEmbryoViewerHandler: function () {
+            var me = this;
+            return function () {
+                window.open('/embryoviewer?mgi=' + me.mgiid);
+            };
+        },
+        renderStageEntry: function (parent, data) {
+            var me = this, entry, node, graphTypeCls = undefined;
+            entry = dcc_createNode(parent, 'div', null, 'dcc-embryo-stage-entry');
+            node = dcc_createNode(entry, 'div', null, 'parameter-name', data.parameterName);
+            switch (data.graphType) {
+                case 'IMAGE':
+                    graphTypeCls = 'image';
+                    break;
+                case 'CATEGORICAL':
+                    graphTypeCls = 'categorical';
+                    break;
+                case '1D':
+                case '2D':
+                    graphTypeCls = 'numerical';
+                    break;
+            }
+            if (data.parameterName === 'Embryo reconstruction')
+                graphTypeCls = 'image';
+            if (graphTypeCls)
+                    node.setAttribute('class',
+                        node.getAttribute('class') + ' dcc-'
+                            + graphTypeCls + '-parameter');
+
+            entry.onclick = data.parameterName === 'Embryo reconstruction' ?
+                me.getEmbryoViewerHandler() : me.getPhenoviewHandler(data);
+        },
+        getTabSelector: function (gid) {
+            var me = this;
+            return function () {
+                me.render(gid);
+            };
+        },
+        render: function (gid) {
+            var me = this, stages, i, procs, params, p, q, stage,
+                table, parameters = '', datum, title, selector,
+                entries, outcome, t;
+            dcc_removeChildrenSubtrees(me.parent);
+            selector = dcc_createNode(me.parent, 'div', null, 'dcc-embryo-selector');
+            table = dcc_createNode(me.parent, 'table', null, 'dcc-embryo-stages');
+            stages = me.gids[gid];
+            for (i in stages) {
+                procs = stages[i];
+                stage = dcc_createNode(table, 'tr');
+                dcc_createNode(stage, 'td', null, null, 'E' + i);
+                stage = dcc_createNode(stage, 'td');
+                for (p in procs) {
+                    title = dcc_createNode(stage, 'div', null, 'dcc-embryo-stage-procs-title');
+                    entries = dcc_createNode(stage, 'div', null, 'dcc-embryo-stage-procs');
+                    params = procs[p];
+                    parameters = '';
+                    outcome = '';
+                    for (q in params) {
+                        datum = params[q];
+                            
+                        /* only include one embryo viability parameter as the
+                         * visualisation always consolidates multiple
+                         * parameters. */
+                        if (datum.parameterKey && (
+                            datum.parameterKey.indexOf('_EVL_') !== -1 ||
+                            datum.parameterKey.indexOf('_EVM_') !== -1 ||
+                            datum.parameterKey.indexOf('_EVO_') !== -1 ||
+                            datum.parameterKey.indexOf('_EVP_') !== -1)
+                        ) {
+                            if (datum.parameterName === 'Outcome') {
+                                outcome = datum.value;
+                                parameters += datum.parameterKey + ',';
+                            }
+                        } else {
+                            me.renderStageEntry(dcc_createNode(entries, 'div',
+                            null, 'dcc-embryo-stage-params'), datum);
+                            parameters += datum.parameterKey + ',';
+                        }
+                    }
+                    dcc_createNode(title, 'div', null, null, p);
+                    if (outcome !== '') {
+                        t = dcc_createNode(entries, 'div', null, 'dcc-viability-proc-outcome', outcome);
+                        t.onclick = me.getPhenoviewHandler(datum);
+                        title.setAttribute('class', title.getAttribute('class') + ' dcc-viability-proc-title');
+                    }
+                    
+                    title.onclick = me.getPhenoviewHandler(datum, parameters);
+                }
+            }
+            dcc_createNode(selector, 'div', null, 'dcc-embryo-selector-gene-symbol',
+                datum.allele.split('<')[0] + ' : Embryo');
+            selector = dcc_createNode(selector, 'div', null, 'dcc-embryo-selector-tabs');
+            for (i in me.gids) {
+                q = i === gid + '' ? ' active' : '';
+                p = me.tabLabels[i];
+                q = dcc_createNode(selector, 'div', null, 'dcc-embryo-selector-centre' + q);
+                dcc_createNode(q, 'div', null, null, p.c);
+                dcc_createNode(q, 'div', null, null, p.x);
+                q.onclick = me.getTabSelector(i);
+            }
         }
     };
 })();

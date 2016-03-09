@@ -24,6 +24,7 @@ limitations under the License.
         <title>PhenoDCC HeatMap (Development Version)</title>
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+            <link href="https://www.mousephenotype.org/data/css/default.css" rel="stylesheet" type="text/css" />
             <!--[if !IE]><!-->
             <link rel="stylesheet" type="text/css" href="css/heatmap.css"/>
             <!--<![endif]-->
@@ -44,12 +45,12 @@ limitations under the License.
         </script>
         <![endif]-->
 
-        <script>
+        <script>            
             new dcc.PhenoHeatMap({
                 /* identifier of <div> node that will host the heatmap */
                 'container': 'phenodcc-heatmap',
                 /* colony identifier (MGI identifier) */
-                'mgiid': 'MGI:3045314',
+                'mgiid': '<%= request.getParameter("mgiid")%>',
                 /* default usage mode: ontological or procedural */
                 'mode': 'ontological',
                 /* number of phenotype columns to use per section */
@@ -58,15 +59,9 @@ limitations under the License.
                     /* the base URL of the heatmap javascript source */
                     'jssrc': 'js/',
                     /* the base URL of the heatmap data source */
-                    'json': 'rest/',
-                    /* function that generates target URL for data
-                     * visualisation */
-                    'viz': function(genotype_id, type) {
-                        return '../phenotypedata?g=' + genotype_id
-                            + '&t=' + type + '&w=all';
-                    }
+                    'json': 'rest/'
                 }
-            });
+            });            
         </script>
     </body>
 </html>

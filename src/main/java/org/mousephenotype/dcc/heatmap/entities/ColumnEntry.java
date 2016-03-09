@@ -30,6 +30,9 @@ public class ColumnEntry implements Serializable {
     private String strain;
     private String centre;
     private String ilar;
+    private Integer cid;
+    private Integer gid;
+    private Integer sid;
 
     public ColumnEntry() {
     }
@@ -88,4 +91,30 @@ public class ColumnEntry implements Serializable {
         this.ilar = ilar;
     }
 
+    @XmlElement(name = "cid")
+    public Integer getCid() {
+        return cid;
+    }
+
+    public void setCid(Integer cid) {
+        this.cid = cid;
+    }
+
+    @XmlElement(name = "gid")
+    public Integer getGid() {
+        return gid;
+    }
+
+    public void setGid(Integer gid) {
+        this.gid = gid;
+    }
+
+    @XmlElement(name = "sid")
+    public Integer getSid() {
+        return sid;
+    }
+
+    public void setSid(Integer sid) {
+        this.sid = sid;
+    }    
 }

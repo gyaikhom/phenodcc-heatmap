@@ -42,34 +42,55 @@ create table parameters_for_procedure_type (
       START OF CODE (new)
 ===========================
 
-truncate `phenodcc_heatmap`.`parameters_for_procedure_type`;
-
 use impress;
+truncate phenodcc_heatmap.parameters_for_procedure_type;
 
 insert into
-    `phenodcc_heatmap`.`parameters_for_procedure_type`
+    phenodcc_heatmap.parameters_for_procedure_type
 (
-    `procedure_type`,
-    `procedure_name`,
-    `parameter_key`,
-    `parameter_name`
+    procedure_type,
+    procedure_name,
+    parameter_key,
+    parameter_name
 )
-
 select distinct
-    `procedure_super_type`.`id`,
-    `procedure_super_type`.`type`,
-    `parameter`.`parameter_key`,
-    `parameter`.`name`
-from `procedure`, `procedure_super_type`, `parameter`, `procedure_has_parameters`, procedure_has_super_type
-where `parameter`.`is_annotation` = 1
-    and `procedure`.`procedure_id` = `procedure_has_super_type`.`procedure_id`
-    and `parameter`.`parameter_id` = `procedure_has_parameters`.`parameter_id`
-    and `procedure_has_parameters`.`procedure_id` = `procedure`.`procedure_id`
-    and `procedure_super_type`.id = procedure_has_super_type.type
-order by
-    `procedure`.`name`,
-    `parameter`.`name`,
-    `procedure`.`type`;
+    pst.id,
+    pst.`type`,
+    q.parameter_key,
+    q.`name`
+from
+	impress.pipeline as l
+    left join impress.pipeline_has_procedures as php on (l.pipeline_id = php.pipeline_id)
+    left join impress.`procedure` as p on (php.procedure_id = p.procedure_id)
+    left join impress.procedure_has_parameters as phq on (php.procedure_id = phq.procedure_id)
+    left join impress.parameter as q on (phq.parameter_id = q.parameter_id)
+    left join impress.procedure_has_super_type as phst on (phst.procedure_id = p.procedure_id)
+    left join impress.procedure_super_type as pst on (pst.id = phst.`type`)
+where
+	l.impc = 1
+    and l.visible = 1
+    and l.active = 1
+    and l.deprecated = 0
+    and l.internal = 0
+    and l.deleted = 0
+    and php.is_visible = 1
+    and php.is_active = 1
+    and php.is_internal = 0
+    and php.is_deprecated = 0
+    and php.is_internal = 0
+    and php.is_deleted = 0
+    and q.visible = 1
+    and q.active = 1
+    and q.deprecated = 0
+    and q.internal = 0
+    and q.deleted = 0
+    and q.is_annotation = 1
+    and q.`type` != 'procedureMetadata'
+    and q.graph_type is not null
+    and q.graph_type != 'NULL' 
+    and pst.`type` is not null
+;
+
 ===========================
        END OF CODE
 ===========================

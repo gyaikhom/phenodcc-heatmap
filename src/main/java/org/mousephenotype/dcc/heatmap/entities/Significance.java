@@ -16,7 +16,6 @@
 package org.mousephenotype.dcc.heatmap.entities;
 
 import java.io.Serializable;
-import javax.xml.bind.annotation.XmlElement;
 
 /**
  *
@@ -26,30 +25,38 @@ public class Significance implements Serializable {
 
     private String key;
     private Integer genotypeId;
-    private Double pvalue;
-        
-    public Significance(Integer procedureType, Integer genotypeId, Double pvalue) {
+    private SignificanceEntry significance;
+
+    public Significance(Integer procedureType, Integer genotypeId,
+            Double pValue, Double homPvalue, Double hetPvalue,
+            Double hemPvalue, Double sexPvalue, Double homSexPvalue,
+            Double hetSexPvalue, Double hemSexPvalue) {
         this.key = procedureType.toString();
         this.genotypeId = genotypeId;
-        this.pvalue = pvalue;
+        this.significance = new SignificanceEntry(
+                pValue, homPvalue, hetPvalue, hemPvalue,
+                sexPvalue, homSexPvalue, hetSexPvalue, hemSexPvalue);
     }
 
-    public Significance(String parameterKey, Integer genotypeId, Double pvalue) {
+    public Significance(String parameterKey, Integer genotypeId,
+            Double pValue, Double homPvalue, Double hetPvalue,
+            Double hemPvalue, Double sexPvalue, Double homSexPvalue,
+            Double hetSexPvalue, Double hemSexPvalue) {
         this.key = parameterKey;
         this.genotypeId = genotypeId;
-        this.pvalue = pvalue;
+        this.significance = new SignificanceEntry(
+                pValue, homPvalue, hetPvalue, hemPvalue,
+                sexPvalue, homSexPvalue, hetSexPvalue, hemSexPvalue);
     }
 
-    @XmlElement(name = "v")
-    public Double getPvalue() {
-        return pvalue;
+    public SignificanceEntry getSignificance() {
+        return significance;
     }
 
-    public void setPvalue(Double pvalue) {
-        this.pvalue = pvalue;
+    public void setSignificance(SignificanceEntry significance) {
+        this.significance = significance;
     }
 
-    @XmlElement(name = "k")
     public String getKey() {
         return key;
     }
@@ -58,7 +65,6 @@ public class Significance implements Serializable {
         this.key = key;
     }
 
-    @XmlElement(name = "g")
     public Integer getGenotypeId() {
         return genotypeId;
     }
@@ -66,5 +72,4 @@ public class Significance implements Serializable {
     public void setGenotypeId(Integer genotypeId) {
         this.genotypeId = genotypeId;
     }
-    
 }

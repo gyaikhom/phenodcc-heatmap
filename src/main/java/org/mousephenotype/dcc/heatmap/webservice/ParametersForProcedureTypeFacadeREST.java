@@ -28,17 +28,18 @@ import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.QueryParam;
 import javax.ws.rs.core.MediaType;
+import org.mousephenotype.dcc.entities.impress.ParamMpterm;
+import org.mousephenotype.dcc.entities.overviews.ACentre;
+import org.mousephenotype.dcc.entities.overviews.Genotype;
+import org.mousephenotype.dcc.entities.overviews.Strain;
 import org.mousephenotype.dcc.heatmap.entities.CellDetails;
-import org.mousephenotype.dcc.heatmap.entities.Centre;
 import org.mousephenotype.dcc.heatmap.entities.ColumnEntry;
 import org.mousephenotype.dcc.heatmap.entities.Details;
-import org.mousephenotype.dcc.heatmap.entities.Genotype;
 import org.mousephenotype.dcc.heatmap.entities.Heatmap;
-import org.mousephenotype.dcc.heatmap.entities.ParamMpterm;
 import org.mousephenotype.dcc.heatmap.entities.ParametersForProcedureType;
 import org.mousephenotype.dcc.heatmap.entities.RowEntry;
 import org.mousephenotype.dcc.heatmap.entities.Significance;
-import org.mousephenotype.dcc.heatmap.entities.Strain;
+import org.mousephenotype.dcc.heatmap.entities.SignificanceEntry;
 
 /**
  *
@@ -70,24 +71,21 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
         return rowEntries;
     }
 
-    private List<ColumnEntry> getColumnEntriesByFilter(String filter) {
-        EntityManager em = getEntityManager();
-        TypedQuery<ColumnEntry> query = em.createNamedQuery(
-                "ParametersForProcedureType.getColumnEntriesFilter",
-                ColumnEntry.class);
-        query.setParameter("filter", filter + "%");
-        List<ColumnEntry> columnEntries = query.getResultList();
-        em.close();
-        return columnEntries;
-    }
-
-    private List<ColumnEntry> getColumnEntriesByMgiId(String mgiId) {
+    private List<ColumnEntry> getColumnEntries(
+            String filter,
+            String mgiId) {
         EntityManager em = getEntityManager();
         TypedQuery<Genotype> query;
         query = em.createNamedQuery(
-                "ParametersForProcedureType.getColumnEntriesMgiId",
+                (filter == null
+                        ? "ParametersForProcedureType.getColumnEntriesMgiId"
+                        : "ParametersForProcedureType.getColumnEntriesFilter"),
                 Genotype.class);
-        query.setParameter("mgiId", mgiId);
+        if (filter == null) {
+            query.setParameter("mgiId", mgiId);
+        } else {
+            query.setParameter("filter", filter + "%");
+        }
         List<ColumnEntry> columnEntries = new ArrayList<>();
         List<Genotype> genes = query.getResultList();
         Iterator<Genotype> i = genes.iterator();
@@ -97,8 +95,11 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
             c.setKey(g.getGenotypeId());
             c.setAllele(g.getAlleleName());
             c.setSymbol(g.getGeneSymbol());
+            c.setGid(g.getGenotypeId());
+            c.setCid(g.getCentreId());
+            c.setSid(g.getStrainId());
 
-            Centre centre = em.find(Centre.class, g.getCentreId());
+            ACentre centre = em.find(ACentre.class, g.getCentreId());
             if (centre != null) {
                 c.setCentre(centre.getFullName());
                 c.setIlar(centre.getShortName());
@@ -114,40 +115,44 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
         return columnEntries;
     }
 
-    private Double[][] getSignificance(
+    private SignificanceEntry[][] getSignificance(
             List<RowEntry> rows,
             List<ColumnEntry> columns,
             Integer type) {
         EntityManager em = getEntityManager();
         TypedQuery<Significance> query;
-
         if (columns.isEmpty() || rows.isEmpty()) {
-            return new Double[0][0];
+            return new SignificanceEntry[0][0];
         }
+        List<Significance> significance = new ArrayList<>();
 
-        if (type == null) {
-            query = em.createNamedQuery("ParametersForProcedureType.getSignificanceFilterUntyped", Significance.class);
-        } else {
-            query = em.createNamedQuery("ParametersForProcedureType.getSignificanceFilterTyped", Significance.class);
-            query.setParameter("type", type);
+        try {
+            if (type == null) {
+                query = em.createNamedQuery("ParametersForProcedureType.getSignificanceFilterUntyped", Significance.class);
+            } else {
+                query = em.createNamedQuery("ParametersForProcedureType.getSignificanceFilterTyped", Significance.class);
+                query.setParameter("type", type);
+            }
+
+            Collection<String> genotypeIds = new ArrayList<>();
+            for (int i = 0, ncol = columns.size(); i < ncol; ++i) {
+                genotypeIds.add(columns.get(i).getKey().toString());
+            }
+            query.setParameter("genotypeIds", genotypeIds);
+
+            significance = query.getResultList();
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
         }
-
-        Collection<String> genotypeIds = new ArrayList<>();
-        for (int i = 0, ncol = columns.size(); i < ncol; ++i) {
-            genotypeIds.add(columns.get(i).getKey().toString());
-        }
-        query.setParameter("genotypeIds", genotypeIds);
-
-        List<Significance> significance = query.getResultList();
         em.close();
         return toGrid(significance, rows, columns);
     }
 
-    private Double[][] toGrid(
+    private SignificanceEntry[][] toGrid(
             List<Significance> significance,
             List<RowEntry> rows,
             List<ColumnEntry> columns) {
-        int i, j, nrow = rows.size(), ncol = columns.size();
+        Integer i, j, nrow = rows.size(), ncol = columns.size();
         HashMap<String, Integer> rowIndex = new HashMap<>();
         HashMap<String, Integer> columnIndex = new HashMap<>();
 
@@ -159,10 +164,10 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
             columnIndex.put(columns.get(i).getKey().toString(), i);
         }
 
-        Double[][] pvalues = new Double[nrow][ncol];
+        SignificanceEntry[][] pvalues = new SignificanceEntry[nrow][ncol];
         for (i = 0; i < nrow; ++i) {
             for (j = 0; j < ncol; ++j) {
-                pvalues[i][j] = -1.0;
+                pvalues[i][j] = new SignificanceEntry(-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0);
             }
         }
 
@@ -171,7 +176,9 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
             Significance s = iterator.next();
             i = rowIndex.get(s.getKey());
             j = columnIndex.get(s.getGenotypeId().toString());
-            pvalues[i][j] = s.getPvalue();
+            if (i != null && j != null) {
+                pvalues[i][j] = s.getSignificance();
+            }
         }
         return pvalues;
     }
@@ -215,26 +222,12 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
     @Path("heatmap")
     public HeatmapPack getByMgiId(
             @QueryParam("type") Integer type,
-            @QueryParam("mgiid") String mgiId) {
-        HeatmapPack p = new HeatmapPack();
-        List<RowEntry> r = getRowEntries(type);
-        List<ColumnEntry> c = getColumnEntriesByMgiId(mgiId);
-        Double[][] v = getSignificance(r, c, type);
-        Heatmap heatmap = new Heatmap("A heatmap", r, c, v);
-        p.setData(heatmap);
-        return p;
-    }
-
-    @GET
-    @Produces(MediaType.APPLICATION_JSON)
-    @Path("byfilter")
-    public HeatmapPack getFiltered(
-            @QueryParam("type") Integer type,
+            @QueryParam("mgiid") String mgiId,
             @QueryParam("filter") String filter) {
         HeatmapPack p = new HeatmapPack();
         List<RowEntry> r = getRowEntries(type);
-        List<ColumnEntry> c = getColumnEntriesByFilter(filter);
-        Double[][] v = getSignificance(r, c, type);
+        List<ColumnEntry> c = getColumnEntries(filter, mgiId);
+        SignificanceEntry[][] v = getSignificance(r, c, type);
         Heatmap heatmap = new Heatmap("A heatmap", r, c, v);
         p.setData(heatmap);
         return p;
@@ -273,12 +266,16 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
         query = em.createNamedQuery("ParametersForProcedureType.getDetails", Details.class);
         query.setParameter("type", type);
         query.setParameter("genotypeId", genotypeId);
-        query.setParameter("threshold", threshold);
         List<Details> tempDetails = query.getResultList();
+        List<Details> significant = new ArrayList<>();
         for (Details x : tempDetails) {
-            setMpTerm(em, x);
+            SignificanceEntry s = x.getSignificance();
+            if (s.getpValue() < threshold || s.getSexPvalue() < threshold) {
+                setMpTerm(em, x);
+                significant.add(x);
+            }
         }
-        CellDetails details = new CellDetails(tempDetails);
+        CellDetails details = new CellDetails(significant);
         em.close();
 
         p.setData(details);
@@ -309,12 +306,16 @@ public class ParametersForProcedureTypeFacadeREST extends AbstractFacade<Paramet
         query = em.createNamedQuery("ParametersForProcedureType.getParameterDetails", Details.class);
         query.setParameter("parameterKey", parameterKey);
         query.setParameter("genotypeId", genotypeId);
-        query.setParameter("threshold", threshold);
         List<Details> tempDetails = query.getResultList();
+        List<Details> significant = new ArrayList<>();
         for (Details x : tempDetails) {
-            setMpTerm(em, x);
+            SignificanceEntry s = x.getSignificance();
+            if (s.getpValue() < threshold || s.getSexPvalue() < threshold) {
+                setMpTerm(em, x);
+                significant.add(x);
+            }
         }
-        CellDetails details = new CellDetails(tempDetails);
+        CellDetails details = new CellDetails(significant);
         em.close();
 
         p.setData(details);

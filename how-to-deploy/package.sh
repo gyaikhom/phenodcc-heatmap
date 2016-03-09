@@ -57,7 +57,7 @@ case $2 in
         ;;
 esac
 
-echo "Poject name: ${project}";
+echo "Project name: ${project}";
 echo "Source directory: ${src_dir}";
 echo "--------------------------------------------------------------------------------";
 
@@ -86,7 +86,7 @@ echo "Generating optimised web application...";
 
 echo "Cleaning project and removing unnecessary files and directories...";
 mvn -q clean;
-rm -Rf .git .gitignore how-to-deploy src/main/webapp/js/heatmap.js src/main/webapp/css/heatmap.css src/main/webapp/css/heatmapIE8.css src/main/webapp/dev.jsp src/main/webapp/js/deploy.sh;
+rm -Rf .git .gitignore how-to-deploy src/main/webapp/js/heatmap.js src/main/webapp/js/phenoview.js src/main/webapp/css/heatmap.css src/main/webapp/css/heatmapIE8.css src/main/webapp/css/phenoview.css src/main/webapp/css/phenoviewIE8.css src/main/webapp/dev.jsp src/main/webapp/phenoview.jsp src/main/webapp/css/ebidesign.css src/main/webapp/js/deploy.sh;
 find src -iname "*.svg" -type f -delete;
 find src -iname "*.xcf" -type f -delete;
 

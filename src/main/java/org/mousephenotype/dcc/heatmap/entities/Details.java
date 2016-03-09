@@ -27,19 +27,25 @@ public class Details implements Serializable, Comparable<Details> {
     private String procedureName;
     private String parameterName;
     private String parameterKey;
+    private Integer zygosity;
     private String mpId;
     private String mpTerm;
     private int selectionOutcome;
-    private Double pValue;
+    private SignificanceEntry significance;
 
     public Details() {
     }
 
-    public Details(String parameterKey, String parameterName,
-            Double pValue, String mpId) {
+    public Details(String parameterKey, String parameterName, Integer zygosity,
+            Double pValue, Double homPvalue, Double hetPvalue, Double hemPvalue,
+            Double sexPvalue, Double homSexPvalue, Double hetSexPvalue,
+            Double hemSexPvalue, String mpId) {
+        this.zygosity = zygosity;
         this.parameterKey = parameterKey;
         this.parameterName = parameterName;
-        this.pValue = pValue;
+        this.significance = new SignificanceEntry(
+                pValue, homPvalue, hetPvalue, hemPvalue,
+                sexPvalue, homSexPvalue, hetSexPvalue, hemSexPvalue);
         this.mpId = mpId;
     }
 
@@ -52,7 +58,6 @@ public class Details implements Serializable, Comparable<Details> {
         this.procedureName = procedureName;
     }
 
-    
     @XmlElement(name = "k")
     public String getParameterKey() {
         return parameterKey;
@@ -89,13 +94,13 @@ public class Details implements Serializable, Comparable<Details> {
         this.mpTerm = term.substring(0, 1).toUpperCase() + term.substring(1);
     }
 
-    @XmlElement(name = "p")
-    public Double getpValue() {
-        return pValue;
+    @XmlElement(name = "s")
+    public SignificanceEntry getSignificance() {
+        return significance;
     }
 
-    public void setpValue(Double pValue) {
-        this.pValue = pValue;
+    public void setSignificance(SignificanceEntry significance) {
+        this.significance = significance;
     }
 
     @XmlElement(name = "o")
@@ -110,5 +115,14 @@ public class Details implements Serializable, Comparable<Details> {
     @Override
     public int compareTo(Details d) {
         return procedureName.compareTo(d.getProcedureName());
+    }
+
+    @XmlElement(name = "z")
+    public Integer getZygosity() {
+        return zygosity;
+    }
+
+    public void setZygosity(Integer zygosity) {
+        this.zygosity = zygosity;
     }
 }

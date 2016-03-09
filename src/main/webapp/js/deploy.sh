@@ -19,22 +19,7 @@
 #
 
 # Minify Javascript
-java -jar /opt/yuicompressor/yuicompressor-2.4.7.jar -o script.js heatmap.js;
-
-# Further minification shortens the function names
-function_names=`grep -o "[a-zA-Z][a-zA-Z0-9]*:function" script.js | cut -d ':' -f 1`;
-
-# Replace each function name with a short name
-count=0;
-for x in $function_names;
-do
-    ((count+=1));
-    sed -e "s/$x:function/f$count:function/g" script.js > temp;
-    sed -e "s/\.$x/\.f$count/g" temp > script.js;
-done;
-
-mv script.js heatmap.DCC_HEATMAP_VERSION.js;
-rm -f temp;
+java -jar /opt/yuicompressor/yuicompressor-2.4.7.jar -o heatmap.DCC_HEATMAP_VERSION.js heatmap.js;
 
 # Minify CSS
 java -jar /opt/yuicompressor/yuicompressor-2.4.7.jar -o ../css/heatmap.DCC_HEATMAP_VERSION.css ../css/heatmap.css;
@@ -51,6 +36,30 @@ case `uname -s` in
         sed -i "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" ../css/heatmap.DCC_HEATMAP_VERSION.css;
         sed -i "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" ../css/heatmapIE8.DCC_HEATMAP_VERSION.css;
         sed -i "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" heatmap.DCC_HEATMAP_VERSION.js;
+        ;;
+esac
+
+##############################################################################
+# Heatmap included by Phenoview
+##############################################################################
+# Minify Javascript
+java -jar /opt/yuicompressor/yuicompressor-2.4.7.jar -o phenoview.DCC_HEATMAP_VERSION.js phenoview.js;
+
+# Minify CSS
+java -jar /opt/yuicompressor/yuicompressor-2.4.7.jar -o ../css/phenoview.DCC_HEATMAP_VERSION.css ../css/phenoview.css;
+java -jar /opt/yuicompressor/yuicompressor-2.4.7.jar -o ../css/phenoviewIE8.DCC_HEATMAP_VERSION.css ../css/phenoviewIE8.css;
+
+# Add copyright notice
+case `uname -s` in
+    Darwin)
+        sed -i "" "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" ../css/phenoview.DCC_HEATMAP_VERSION.css;
+        sed -i "" "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" ../css/phenoviewIE8.DCC_HEATMAP_VERSION.css;
+        sed -i "" "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" phenoview.DCC_HEATMAP_VERSION.js;
+        ;;
+    *)
+        sed -i "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" ../css/phenoview.DCC_HEATMAP_VERSION.css;
+        sed -i "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" ../css/phenoviewIE8.DCC_HEATMAP_VERSION.css;
+        sed -i "1s/^/\/* Copyright 2013 Medical Research Council Harwell *\//" phenoview.DCC_HEATMAP_VERSION.js;
         ;;
 esac
 

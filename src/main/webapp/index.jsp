@@ -24,6 +24,7 @@ limitations under the License.
         <title>PhenoDCC HeatMap</title>
         <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
             <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+            <link href="https://www.mousephenotype.org/data/css/default.css" rel="stylesheet" type="text/css" />
             <!--[if !IE]><!-->
             <link rel="stylesheet" type="text/css" href="css/heatmap.DCC_HEATMAP_VERSION.css"/>
             <!--<![endif]-->
@@ -58,13 +59,7 @@ limitations under the License.
                     /* the base URL of the heatmap javascript source */
                     'jssrc': 'js/',
                     /* the base URL of the heatmap data source */
-                    'json': 'rest/',
-                    /* function that generates target URL for data
-                     * visualisation */
-                    'viz': function(genotype_id, type) {
-                        return '../phenotypedata?g=' + genotype_id
-                            + '&t=' + type + '&w=all';
-                    }
+                    'json': 'rest/'
                 }
             });
         </script>
